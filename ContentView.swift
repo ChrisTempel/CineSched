@@ -291,32 +291,28 @@ class PDFExporter {
         shootDays: [ShootDay]
     ) {
         let titleAttr: [NSAttributedString.Key: Any] = [
-            .font: NSFont.boldSystemFont(ofSize: 18),
+            .font: NSFont.boldSystemFont(ofSize: 14),  // Reduced from 18
             .foregroundColor: NSColor.black
         ]
         let title = NSAttributedString(string: projectTitle.isEmpty ? "Untitled Movie" : projectTitle, attributes: titleAttr)
-        title.draw(in: CGRect(x: rect.minX, y: rect.maxY - 30, width: rect.width, height: 30))
+        title.draw(in: CGRect(x: rect.minX, y: rect.maxY - 25, width: rect.width, height: 25))
         
-        let df = DateFormatter()
-        df.dateFormat = "MMMM d, yyyy"
-        let range = "\(df.string(from: startDate)) - \(df.string(from: endDate))"
+        // Date range removed
         
         let smallAttr: [NSAttributedString.Key: Any] = [
             .font: NSFont.systemFont(ofSize: 10),
             .foregroundColor: NSColor.gray
         ]
-        NSAttributedString(string: range, attributes: smallAttr)
-            .draw(in: CGRect(x: rect.minX, y: rect.maxY - 55, width: rect.width, height: 20))
         
         let scheduled = shootDays.filter { !$0.scenes.isEmpty }.count
         NSAttributedString(string: "Shoot Days: \(scheduled)", attributes: smallAttr)
-            .draw(in: CGRect(x: rect.minX, y: rect.maxY - 80, width: rect.width, height: 20))
+            .draw(in: CGRect(x: rect.minX, y: rect.maxY - 50, width: rect.width, height: 20))
     }
     
     private static func calculateIdealRowHeights(weeks: [[ShootDay?]]) -> [CGFloat] {
         let minHeight: CGFloat = 60
         let baseHeight: CGFloat = 100
-        let maxHeight: CGFloat = 200   // ← increased from previous versions to reduce crowding
+        let maxHeight: CGFloat = 220   // Increased to accommodate more scenes
         
         return weeks.map { week in
             let maxScenes = week.compactMap { $0 }.map(\.scenes.count).max() ?? 0
@@ -324,8 +320,9 @@ class PDFExporter {
             switch maxScenes {
             case 0:       return minHeight
             case 1...2:   return minHeight + 20
-            case 3...5:   return baseHeight
-            case 6...8:   return baseHeight + 40
+            case 3...4:   return baseHeight
+            case 5...7:   return baseHeight + 50  // More height for 5-7 scenes
+            case 8...10:  return maxHeight - 20
             default:      return maxHeight
             }
         }
@@ -357,14 +354,18 @@ class PDFExporter {
         path.lineWidth = 0.5
         NSColor.lightGray.setStroke()
         
-        // Vertical lines — full page height
+        // Calculate the actual content bounds (where calendar rows exist)
+        let topOfContent = horizontalLines.first ?? maxY
+        let bottomOfContent = horizontalLines.last ?? minY
+        
+        // Vertical lines – ONLY extend from bottom to top of actual calendar content
         for i in 0...7 {
             let x = minX + CGFloat(i) * ((maxX - minX) / 7)
-            path.move(to: CGPoint(x: x, y: minY))
-            path.line(to: CGPoint(x: x, y: maxY))
+            path.move(to: CGPoint(x: x, y: bottomOfContent))
+            path.line(to: CGPoint(x: x, y: topOfContent))
         }
         
-        // Horizontal lines — only the ones that exist on this page
+        // Horizontal lines – only the ones that exist on this page
         for y in horizontalLines {
             path.move(to: CGPoint(x: minX, y: y))
             path.line(to: CGPoint(x: maxX, y: y))
@@ -373,9 +374,120 @@ class PDFExporter {
         path.stroke()
     }
     
-    // Keep your existing drawDay(_:in:) function here (unchanged)
-    // You can copy-paste it from your original code if needed.
-    // Most people keep it exactly as it was.
+    private static func drawDay(day: ShootDay, in rect: CGRect) {
+        let padding: CGFloat = 8
+        let contentRect = CGRect(
+            x: rect.minX + padding,
+            y: rect.minY + padding,
+            width: rect.width - 2 * padding,
+            height: rect.height - 2 * padding
+        )
+        
+        // Date header - positioned at TOP of cell (maxY)
+        let dateFormatter = DateFormatter()
+        dateFormatter.dateFormat = "E MMM d"
+        let dateString = dateFormatter.string(from: day.date)
+        
+        let dateAttributes: [NSAttributedString.Key: Any] = [
+            .font: NSFont.boldSystemFont(ofSize: 10),
+            .foregroundColor: NSColor.black
+        ]
+        
+        let dateAttrString = NSAttributedString(string: dateString, attributes: dateAttributes)
+        let dateRect = CGRect(x: contentRect.minX, y: contentRect.maxY - 12, width: contentRect.width, height: 12)
+        dateAttrString.draw(in: dateRect)
+        
+        // Calculate available space for scenes
+        let availableSceneHeight = contentRect.height - 16 - (day.scenes.isEmpty ? 0 : 25) // Reserve space for date and totals
+        
+        // FIXED: Use consistent small font (8pt) and calculate box height needed
+        let fontSize: CGFloat = 8
+        let boxHeightPerScene: CGFloat = 11 // 8pt font + 3pt padding
+        
+        // Scenes - start from just below the date
+        var yOffset: CGFloat = 16 // Offset from top
+        
+        let sceneAttributes: [NSAttributedString.Key: Any] = [
+            .font: NSFont.systemFont(ofSize: fontSize),
+            .foregroundColor: NSColor.black
+        ]
+        
+        // Calculate how many scenes we can actually fit
+        let maxVisibleScenes = Int(availableSceneHeight / boxHeightPerScene)
+        let scenesToShow = min(day.scenes.count, maxVisibleScenes)
+        
+        for i in 0..<scenesToShow {
+            let scene = day.scenes[i]
+            
+            // Create scene box with consistent height
+            let boxHeight = boxHeightPerScene
+            let boxRect = CGRect(
+                x: contentRect.minX,
+                y: contentRect.maxY - yOffset - boxHeight,
+                width: contentRect.width,
+                height: boxHeight
+            )
+            
+            // Draw box background based on day/night type
+            let boxPath = NSBezierPath(roundedRect: boxRect, xRadius: 2, yRadius: 2)
+            if scene.dayNightType == .night {
+                NSColor(white: 0.9, alpha: 1.0).setFill() // Light gray for night scenes
+            } else {
+                NSColor.white.setFill() // White for day scenes
+            }
+            boxPath.fill()
+            
+            // Draw box border
+            NSColor.lightGray.setStroke()
+            boxPath.lineWidth = 0.5
+            boxPath.stroke()
+            
+            // Draw scene text - centered vertically in the box
+            let sceneAttrString = NSAttributedString(string: scene.title, attributes: sceneAttributes)
+            let textRect = CGRect(
+                x: contentRect.minX + 3,
+                y: contentRect.maxY - yOffset - boxHeight + 1.5,  // Position from bottom of box with small padding
+                width: contentRect.width - 6,
+                height: fontSize + 2  // Give a little extra height
+            )
+            sceneAttrString.draw(in: textRect)
+            
+            yOffset += boxHeightPerScene
+        }
+        
+        // Show "more" indicator if we couldn't fit all scenes
+        if day.scenes.count > scenesToShow {
+            let remainingCount = day.scenes.count - scenesToShow
+            let moreText = "... +\(remainingCount) more"
+            let moreAttrString = NSAttributedString(string: moreText, attributes: sceneAttributes)
+            let moreRect = CGRect(
+                x: contentRect.minX,
+                y: contentRect.maxY - yOffset - fontSize,
+                width: contentRect.width,
+                height: fontSize
+            )
+            moreAttrString.draw(in: moreRect)
+        }
+        
+        // Totals at bottom of cell
+        if !day.scenes.isEmpty {
+            let totalText = "Total: \(formattedEighths(day.totalDuration))\nEst: \(formattedTime(day.totalEstimatedTime))"
+            
+            let totalAttributes: [NSAttributedString.Key: Any] = [
+                .font: NSFont.systemFont(ofSize: 7),
+                .foregroundColor: NSColor.gray
+            ]
+            
+            let totalAttrString = NSAttributedString(string: totalText, attributes: totalAttributes)
+            let totalRect = CGRect(
+                x: contentRect.minX,
+                y: contentRect.minY,
+                width: contentRect.width,
+                height: 20
+            )
+            totalAttrString.draw(in: totalRect)
+        }
+    }
     
     private static func groupDaysIntoWeeks(_ shootDays: [ShootDay]) -> [[ShootDay?]] {
         guard !shootDays.isEmpty else { return [] }
