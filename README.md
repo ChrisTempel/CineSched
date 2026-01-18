@@ -2,7 +2,7 @@ This is still a work in progress.  It was vibe-coded with Claude, ChatGPT and Ge
 It is written in Swift and designed to run on MacOS Sequoia and higher.
 
 Some features I'd like to evtually add include:
-* .fdx import where scenes are added automatically to the Boneyard.  Scene naming convention is #: LOCATION .  For example, 13: WOODS . Time of Day checkbox should mark automatically when the script is imported and Words like DAY or NIGHT should not be added to the Location description.
+* .fdx import where scenes are added automatically to the Boneyard.  Scene naming convention is #: INT/EXT LOCATION .  For example, 13: EXT WOODS . Time of Day checkbox should mark automatically when the script is imported and Words like DAY or NIGHT should not be added to the Location description.
 * Ability to select a single scene and have a border appear around it showing that it is selected.  Clicking off should clear the selection.
 * Ability to laso select multiple scenes and move them at once
 * Ability to double click a blank spot in the calendar to create and add a scene, bypassing the Boneyard
