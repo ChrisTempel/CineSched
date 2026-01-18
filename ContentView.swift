@@ -93,8 +93,8 @@ struct FractionParser {
 struct TimeParser {
     /// Converts various time formats to minutes
     /// Rules:
-    /// - Numbers ≤ 12: interpreted as hours (e.g., "4" = 4 hours = 240 minutes)
-    /// - Numbers > 12: interpreted as minutes (e.g., "15" = 15 minutes)
+    /// - Numbers ≤ 14: interpreted as hours (e.g., "4" = 4 hours = 240 minutes)
+    /// - Numbers > 14: interpreted as minutes (e.g., "15" = 15 minutes)
     /// - "H:MM" format: explicit hours:minutes (e.g., "2:30" = 2 hours 30 minutes = 150 minutes)
     /// - Decimal hours: (e.g., "2.5" = 2.5 hours = 150 minutes)
     static func parseToMinutes(_ input: String) -> Int? {
@@ -119,8 +119,8 @@ struct TimeParser {
         
         // Handle decimal hours (e.g., "2.5" = 2.5 hours)
         if let decimal = Double(trimmed) {
-            if decimal <= 10 { // Changed to 10 for better heuristic, but keeping the original 12 for safety. Let's stick to 10-12
-                // Interpret as hours (original logic was <= 12)
+            if decimal <= 14 {
+                // Interpret as hours (original logic was <= 14)
                 return Int(decimal * 60)
             } else {
                 // Interpret as minutes
@@ -217,7 +217,7 @@ class PDFExporter {
             
             // Header only on first page
             if pageNumber == 1 {
-                let headerHeight: CGFloat = 80
+                let headerHeight: CGFloat = 50  // Reduced from 80 to match actual content
                 let headerRect = CGRect(
                     x: contentRect.minX,
                     y: contentRect.maxY - headerHeight,
@@ -232,7 +232,7 @@ class PDFExporter {
                     allScenes: allScenes,
                     shootDays: shootDays
                 )
-                currentY = contentRect.maxY - headerHeight - 20
+                currentY = contentRect.maxY - headerHeight - 10  // Reduced gap from 20 to 10
             } else {
                 currentY = contentRect.maxY
             }
@@ -311,7 +311,7 @@ class PDFExporter {
     
     private static func calculateIdealRowHeights(weeks: [[ShootDay?]]) -> [CGFloat] {
         let minHeight: CGFloat = 60
-        let baseHeight: CGFloat = 100
+        let baseHeight: CGFloat = 120
         let maxHeight: CGFloat = 220   // Increased to accommodate more scenes
         
         return weeks.map { week in
