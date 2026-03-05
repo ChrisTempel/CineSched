@@ -6,6 +6,14 @@ import Foundation
 import PDFKit
 import AppKit
 
+// MARK: - Custom UTType for FDX files
+
+extension UTType {
+    static var fdx: UTType {
+        UTType(importedAs: "com.finaldraft.fdx")
+    }
+}
+
 
 // MARK: - Fraction Parser Utility
 
@@ -310,21 +318,23 @@ class PDFExporter {
     }
     
     private static func calculateIdealRowHeights(weeks: [[ShootDay?]]) -> [CGFloat] {
-        let minHeight: CGFloat = 60
-        let baseHeight: CGFloat = 120
-        let maxHeight: CGFloat = 220   // Increased to accommodate more scenes
+        let minHeight: CGFloat = 50       // Reduced from 60
+        let baseHeight: CGFloat = 80      // Reduced from 120
+        let maxHeight: CGFloat = 160      // Reduced from 220
         
+        // Calculate based on actual content needed
         return weeks.map { week in
             let maxScenes = week.compactMap { $0 }.map(\.scenes.count).max() ?? 0
             
-            switch maxScenes {
-            case 0:       return minHeight
-            case 1...2:   return minHeight + 20
-            case 3...4:   return baseHeight
-            case 5...7:   return baseHeight + 50  // More height for 5-7 scenes
-            case 8...10:  return maxHeight - 20
-            default:      return maxHeight
-            }
+            // More aggressive sizing based on scene count
+            // Each scene box is 11px + we need ~40px for date header and totals
+            let contentHeight: CGFloat = 40 + (CGFloat(maxScenes) * 11)
+            
+            // Add some breathing room but keep it tight
+            let calculatedHeight = contentHeight + 20
+            
+            // Clamp to min/max
+            return min(max(calculatedHeight, minHeight), maxHeight)
         }
     }
     
@@ -397,28 +407,24 @@ class PDFExporter {
         let dateRect = CGRect(x: contentRect.minX, y: contentRect.maxY - 12, width: contentRect.width, height: 12)
         dateAttrString.draw(in: dateRect)
         
-        // Calculate available space for scenes
-        let availableSceneHeight = contentRect.height - 16 - (day.scenes.isEmpty ? 0 : 25) // Reserve space for date and totals
-        
         // FIXED: Use consistent small font (8pt) and calculate box height needed
         let fontSize: CGFloat = 8
         let boxHeightPerScene: CGFloat = 11 // 8pt font + 3pt padding
         
         // Scenes - start from just below the date
-        var yOffset: CGFloat = 16 // Offset from top
+        var yOffset: CGFloat = 16 // Offset from top (space for date header)
+        
+        // Create paragraph style for truncation
+        let paragraphStyle = NSMutableParagraphStyle()
+        paragraphStyle.lineBreakMode = .byTruncatingTail  // Add ellipsis at the end
         
         let sceneAttributes: [NSAttributedString.Key: Any] = [
             .font: NSFont.systemFont(ofSize: fontSize),
-            .foregroundColor: NSColor.black
+            .foregroundColor: NSColor.black,
+            .paragraphStyle: paragraphStyle
         ]
         
-        // Calculate how many scenes we can actually fit
-        let maxVisibleScenes = Int(availableSceneHeight / boxHeightPerScene)
-        let scenesToShow = min(day.scenes.count, maxVisibleScenes)
-        
-        for i in 0..<scenesToShow {
-            let scene = day.scenes[i]
-            
+        for scene in day.scenes {
             // Create scene box with consistent height
             let boxHeight = boxHeightPerScene
             let boxRect = CGRect(
@@ -442,34 +448,25 @@ class PDFExporter {
             boxPath.lineWidth = 0.5
             boxPath.stroke()
             
-            // Draw scene text - centered vertically in the box
+            // Draw scene text - properly positioned with truncation
             let sceneAttrString = NSAttributedString(string: scene.title, attributes: sceneAttributes)
+            
+            // Calculate vertical centering
+            let textHeight = sceneAttrString.size().height
+            let verticalOffset = (boxHeight - textHeight) / 2
+            
             let textRect = CGRect(
                 x: contentRect.minX + 3,
-                y: contentRect.maxY - yOffset - boxHeight + 1.5,  // Position from bottom of box with small padding
+                y: contentRect.maxY - yOffset - boxHeight + verticalOffset,
                 width: contentRect.width - 6,
-                height: fontSize + 2  // Give a little extra height
+                height: textHeight
             )
             sceneAttrString.draw(in: textRect)
             
             yOffset += boxHeightPerScene
         }
         
-        // Show "more" indicator if we couldn't fit all scenes
-        if day.scenes.count > scenesToShow {
-            let remainingCount = day.scenes.count - scenesToShow
-            let moreText = "... +\(remainingCount) more"
-            let moreAttrString = NSAttributedString(string: moreText, attributes: sceneAttributes)
-            let moreRect = CGRect(
-                x: contentRect.minX,
-                y: contentRect.maxY - yOffset - fontSize,
-                width: contentRect.width,
-                height: fontSize
-            )
-            moreAttrString.draw(in: moreRect)
-        }
-        
-        // Totals at bottom of cell
+        // Totals at bottom of cell (aligned)
         if !day.scenes.isEmpty {
             let totalText = "Total: \(formattedEighths(day.totalDuration))\nEst: \(formattedTime(day.totalEstimatedTime))"
             
@@ -481,7 +478,7 @@ class PDFExporter {
             let totalAttrString = NSAttributedString(string: totalText, attributes: totalAttributes)
             let totalRect = CGRect(
                 x: contentRect.minX,
-                y: contentRect.minY,
+                y: contentRect.minY,  // Back to bottom of cell
                 width: contentRect.width,
                 height: 20
             )
@@ -853,13 +850,17 @@ struct Scene: Identifiable, Codable, Hashable {
     var duration: Int // eighths
     var estimatedTime: Int // minutes
     var dayNightType: DayNightType // NEW: Day/Night classification
+    var cast: String // Cast members
+    var summary: String // Scene description/summary
     
-    init(title: String, duration: Int, estimatedTime: Int, dayNightType: DayNightType = .day) {
+    init(title: String, duration: Int, estimatedTime: Int, dayNightType: DayNightType = .day, cast: String = "", summary: String = "") {
         self.id = UUID()
         self.title = title
         self.duration = duration
         self.estimatedTime = estimatedTime
         self.dayNightType = dayNightType
+        self.cast = cast
+        self.summary = summary
     }
 }
 
@@ -930,6 +931,8 @@ struct SceneEditSheet: View {
     @State private var editDuration: String = ""
     @State private var editEstimatedTime: String = ""
     @State private var editDayNightType: DayNightType = .day
+    @State private var editCast: String = ""
+    @State private var editSummary: String = ""
     
     // Validation states
     @State private var durationIsValid: Bool = true
@@ -993,6 +996,24 @@ struct SceneEditSheet: View {
                     }
                 }
                 
+                // Cast field
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Cast")
+                        .font(.headline)
+                    TextField("Enter cast members (e.g., John, Mary, Bob)", text: $editCast)
+                        .textFieldStyle(RoundedBorderTextFieldStyle())
+                }
+                
+                // Scene Summary field
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Scene Summary")
+                        .font(.headline)
+                    TextEditor(text: $editSummary)
+                        .frame(minHeight: 100)
+                        .border(Color.gray.opacity(0.3), width: 1)
+                        .cornerRadius(4)
+                }
+                
                 // Day/Night Selection
                 VStack(alignment: .leading, spacing: 8) {
                     Text("Time of Day")
@@ -1051,14 +1072,33 @@ struct SceneEditSheet: View {
             }
         }
         .padding(24)
-        .frame(width: 500)
+        .frame(width: 550)
         .onAppear {
             editTitle = scene.title
             editDuration = FractionParser.formatEighths(scene.duration)
-            editEstimatedTime = TimeParser.formatMinutes(scene.estimatedTime)
+            editEstimatedTime = formatMinutesForEditing(scene.estimatedTime)
             editDayNightType = scene.dayNightType
+            editCast = scene.cast
+            editSummary = scene.summary
             validateDuration()
             validateEstimatedTime()
+        }
+    }
+    
+    // Helper function to format minutes as editable input (without "min" or "hr" text)
+    private func formatMinutesForEditing(_ minutes: Int) -> String {
+        let hours = minutes / 60
+        let mins = minutes % 60
+        
+        if hours > 0 && mins > 0 {
+            // Use H:MM format (e.g., "2:30")
+            return "\(hours):\(String(format: "%02d", mins))"
+        } else if hours > 0 {
+            // Just hours (e.g., "2")
+            return "\(hours)"
+        } else {
+            // Just minutes (e.g., "15")
+            return "\(mins)"
         }
     }
     
@@ -1073,6 +1113,8 @@ struct SceneEditSheet: View {
     private func saveChanges() {
         scene.title = editTitle
         scene.dayNightType = editDayNightType
+        scene.cast = editCast
+        scene.summary = editSummary
         
         if let parsedDuration = FractionParser.parseToEighths(editDuration) {
             scene.duration = parsedDuration
@@ -1402,7 +1444,9 @@ struct CompactMonthCalendarView: View {
             title: scene.title + " (Copy)",
             duration: scene.duration,
             estimatedTime: scene.estimatedTime,
-            dayNightType: scene.dayNightType
+            dayNightType: scene.dayNightType,
+            cast: scene.cast,
+            summary: scene.summary
         )
         allScenes.append(duplicatedScene)
         onSceneChanged()
@@ -1486,7 +1530,7 @@ struct SceneCardView: View {
                     .lineLimit(2)
                 
                 HStack {
-                    Text("(\(formattedEighths(scene.duration)), \(scene.estimatedTime) min)")
+                    Text("(\(formattedEighths(scene.duration)), \(formattedTime(scene.estimatedTime)))")
                         .font(.caption2)
                         .foregroundColor(.secondary)
                     
@@ -1571,12 +1615,15 @@ struct SceneCardView: View {
 
 struct DropIndicatorView: View {
     var body: some View {
-        Rectangle()
-            .fill(Color.red)
-            .frame(height: 3)
-            .cornerRadius(1.5)
+        RoundedRectangle(cornerRadius: 4)
+            .fill(Color.blue.opacity(0.3))
+            .frame(height: 6)
             .padding(.horizontal, 8)
-            .opacity(0.8)
+            .overlay(
+                RoundedRectangle(cornerRadius: 4)
+                    .stroke(Color.blue, lineWidth: 1)
+            )
+            .accessibilityLabel("Drop zone")
             .animation(.easeInOut(duration: 0.3), value: true)
     }
 }
@@ -1716,6 +1763,19 @@ struct ContentView: View {
     
     // NEW: Toggle for schedule shifting vs. merging (default is merge/lock)
     @State private var isShiftModeEnabled: Bool = false
+    
+    // FDX Import State
+    @State private var showingImportAlert = false
+    @State private var importMessage = ""
+    @State private var importedScenesCount = 0
+    
+    // File import type tracking
+    @State private var fileImportType: FileImportType = .json
+    
+    enum FileImportType {
+        case json
+        case fdx
+    }
 
     // MARK: - Computed Properties for Compact Statistics
     private var scheduledDays: [ShootDay] {
@@ -1823,7 +1883,7 @@ struct ContentView: View {
                                 .foregroundColor(scene.dayNightType.color)
                                 .fontWeight(.semibold)
                             
-                            Text("\(FractionParser.formatEighths(scene.duration)) / \(scene.estimatedTime) min")
+                            Text("\(FractionParser.formatEighths(scene.duration)) / \(formattedTime(scene.estimatedTime))")
 
                             Button(action: {
                                 allScenes.remove(at: index)
@@ -1855,7 +1915,9 @@ struct ContentView: View {
                                     title: scene.title + " (Copy)",
                                     duration: scene.duration,
                                     estimatedTime: scene.estimatedTime,
-                                    dayNightType: scene.dayNightType
+                                    dayNightType: scene.dayNightType,
+                                    cast: scene.cast,
+                                    summary: scene.summary
                                 )
                                 allScenes.append(duplicatedScene)
                                 scheduleAutoSave()
@@ -1882,10 +1944,18 @@ struct ContentView: View {
                 HStack {
                     // Action buttons on the left
                     HStack(spacing: 12) {
-                        Button("Export PDF") {
-                            showingPDFExporter = true
+                        Button("New") {
+                            showingClearAllConfirmation = true
                         }
-                        .buttonStyle(.borderedProminent)
+                        .buttonStyle(.bordered)
+                        .foregroundColor(.red)
+                        
+                        Button("Import Script") {
+                            fileImportType = .fdx
+                            showingFileImporter = true
+                        }
+                        .buttonStyle(.bordered)
+                        .help("Import scenes from Final Draft script (.fdx)")
                         
                         // FIXED SAVE BUTTON - Now uses native dialog
                         Button("Save") {
@@ -1894,17 +1964,15 @@ struct ContentView: View {
                         .buttonStyle(.bordered)
                         
                         Button("Load") {
-                            print("Load Schedule button clicked")
+                            fileImportType = .json
                             showingFileImporter = true
-                            print("showingFileImporter is now: \(showingFileImporter)")
                         }
                         .buttonStyle(.bordered)
                         
-                        Button("New") {
-                            showingClearAllConfirmation = true
+                        Button("Export PDF") {
+                            showingPDFExporter = true
                         }
-                        .buttonStyle(.bordered)
-                        .foregroundColor(.red)
+                        .buttonStyle(.borderedProminent)
                         
                         // Dark/Light Mode Toggle Button with better animation
                         Button(action: {
@@ -1921,8 +1989,6 @@ struct ContentView: View {
                                     .font(.caption)
                                     .fontWeight(.medium)
                             }
-                            .padding(.horizontal, 8)
-                            .padding(.vertical, 4)
                         }
                         .buttonStyle(.bordered)
                         .help(isDarkMode ? "Switch to Light Mode" : "Switch to Dark Mode")
@@ -1969,20 +2035,6 @@ struct ContentView: View {
                                     .fontWeight(.semibold)
                                     .foregroundColor(.green)
                                 Text("scenes")
-                                    .font(.caption)
-                                    .foregroundColor(.secondary)
-                            }
-                            
-                            // Total Duration
-                            HStack(spacing: 3) {
-                                Image(systemName: "doc.text")
-                                    .foregroundColor(.orange)
-                                    .font(.caption)
-                                Text(totalDuration)
-                                    .font(.system(.body, design: .rounded))
-                                    .fontWeight(.semibold)
-                                    .foregroundColor(.orange)
-                                Text("pages")
                                     .font(.caption)
                                     .foregroundColor(.secondary)
                             }
@@ -2034,12 +2086,21 @@ struct ContentView: View {
         }
         .fileImporter(
             isPresented: $showingFileImporter,
-            allowedContentTypes: [.json],
+            allowedContentTypes: fileImportType == .json ? [.json] : [.fdx, .xml],
             allowsMultipleSelection: false
         ) { result in
             DispatchQueue.main.async {
-                handleLoadResult(result)
+                if fileImportType == .json {
+                    handleLoadResult(result)
+                } else {
+                    handleFDXImport(result)
+                }
             }
+        }
+        .alert("Script Import", isPresented: $showingImportAlert) {
+            Button("OK") { }
+        } message: {
+            Text(importMessage)
         }
         .alert("CineSched", isPresented: $showingAlert) {
             Button("OK") { }
@@ -2284,6 +2345,87 @@ struct ContentView: View {
         }
     }
     
+    private func handleFDXImport(_ result: Result<[URL], Error>) {
+        switch result {
+        case .success(let urls):
+            guard let url = urls.first else {
+                importMessage = "No file selected"
+                showingImportAlert = true
+                return
+            }
+            importFDXScript(from: url)
+        case .failure(let error):
+            importMessage = "Failed to select file: \(error.localizedDescription)"
+            showingImportAlert = true
+            print("FDX import error: \(error)")
+        }
+    }
+    
+    private func importFDXScript(from url: URL) {
+        do {
+            guard url.startAccessingSecurityScopedResource() else {
+                importMessage = "Unable to access the selected file."
+                showingImportAlert = true
+                return
+            }
+            
+            defer {
+                url.stopAccessingSecurityScopedResource()
+            }
+            
+            // Parse the FDX file
+            let parsedScenes = try FinalDraftParser.parseScenes(from: url)
+            
+            guard !parsedScenes.isEmpty else {
+                importMessage = "No scenes found in the script."
+                showingImportAlert = true
+                return
+            }
+            
+            // Convert parsed scenes to Scene objects
+            var importedCount = 0
+            for parsedScene in parsedScenes {
+                // Create the scene title (scene number + location)
+                let sceneTitle = "\(parsedScene.sceneNumber). \(parsedScene.location)"
+                
+                // Determine day/night type
+                let dayNightType: DayNightType
+                switch parsedScene.timeOfDay {
+                case .day:
+                    dayNightType = .day
+                case .night:
+                    dayNightType = .night
+                case .unknown:
+                    dayNightType = .day // Default to day if unknown
+                }
+                
+                // Create new scene with default values (1 page, 4 hours)
+                let newScene = Scene(
+                    title: sceneTitle,
+                    duration: 1, // 1/8 page in eighths
+                    estimatedTime: 15, // 15 minutes
+                    dayNightType: dayNightType
+                )
+                
+                allScenes.append(newScene)
+                importedCount += 1
+            }
+            
+            // Save and show success message
+            scheduleAutoSave()
+            importedScenesCount = importedCount
+            importMessage = "Successfully imported \(importedCount) scene\(importedCount == 1 ? "" : "s") from '\(url.lastPathComponent)'.\n\nScenes have been added to the Boneyard with default values (1/8 page, 15 minutes). You can edit them before scheduling."
+            showingImportAlert = true
+            
+            print("Successfully imported \(importedCount) scenes from FDX")
+            
+        } catch {
+            importMessage = "Failed to import script: \(error.localizedDescription)\n\nMake sure the file is a valid Final Draft (.fdx) script."
+            showingImportAlert = true
+            print("FDX import error: \(error)")
+        }
+    }
+    
     private func loadProject(from url: URL) {
         do {
             guard url.startAccessingSecurityScopedResource() else {
@@ -2385,7 +2527,7 @@ struct ContentView: View {
     private func scheduleAutoSave() {
         autoSaveTimer?.invalidate()
         autoSaveTimer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: false) { _ in
-            saveDefaultProject()
+            self.saveDefaultProject()
         }
     }
 
