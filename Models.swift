@@ -54,7 +54,6 @@ struct Scene: Identifiable, Codable, Hashable {
     }
 
     /// Decodes cast from either the new [String] format or the legacy String format.
-    /// Old saves stored cast as a single comma-separated string; new saves store an array.
     init(from decoder: Decoder) throws {
         let c         = try decoder.container(keyedBy: CodingKeys.self)
         id            = try c.decode(UUID.self,         forKey: .id)
@@ -64,7 +63,6 @@ struct Scene: Identifiable, Codable, Hashable {
         dayNightType  = try c.decode(DayNightType.self, forKey: .dayNightType)
         summary       = try c.decodeIfPresent(String.self, forKey: .summary) ?? ""
 
-        // Migration: try [String] first, fall back to legacy comma-separated String
         if let array = try? c.decode([String].self, forKey: .cast) {
             cast = array
         } else if let legacy = try? c.decode(String.self, forKey: .cast) {
@@ -78,21 +76,140 @@ struct Scene: Identifiable, Codable, Hashable {
     }
 }
 
+// MARK: - Location
+
+struct Location: Identifiable, Codable, Hashable {
+    let id: UUID
+    var name:    String   // e.g. "Owen's Farmhouse"
+    var address: String   // e.g. "123 Rural Rd, Whitefish MT"
+
+    init(name: String = "", address: String = "") {
+        self.id      = UUID()
+        self.name    = name
+        self.address = address
+    }
+}
+
+// MARK: - CallSheetData
+// Per-day call sheet fields. Stored on ShootDay and saved with the project.
+
+struct CallSheetData: Codable {
+    var generalCallTime: String    // e.g. "7:00 AM"
+    var locations: [Location]      // ordered list; first is primary
+    var castOverride: [String]?    // nil = use auto-pulled cast from scenes
+    var notes: String
+
+    init(
+        generalCallTime: String = "",
+        locations: [Location] = [],
+        castOverride: [String]? = nil,
+        notes: String = ""
+    ) {
+        self.generalCallTime = generalCallTime
+        self.locations       = locations
+        self.castOverride    = castOverride
+        self.notes           = notes
+    }
+
+    /// Returns cast display strings for the call sheet.
+    /// Each character name from the scenes is looked up in the production cast list.
+    /// If a match is found, returns "Actor Name — Character". Otherwise just the character name.
+    /// If castOverride is set, those strings are returned as-is.
+    func resolvedCast(from scenes: [Scene], productionInfo: ProductionInfo? = nil) -> [String] {
+        if let override = castOverride { return override }
+
+        let characters = Array(Set(scenes.flatMap { $0.cast })).sorted()
+        guard let production = productionInfo, !production.castList.isEmpty else {
+            return characters
+        }
+
+        return characters.map { character in
+            if let match = production.castList.first(where: {
+                $0.characterName.trimmingCharacters(in: .whitespaces)
+                    .caseInsensitiveCompare(character.trimmingCharacters(in: .whitespaces)) == .orderedSame
+            }) {
+                return match.displayString
+            }
+            return character  // no match — show character name alone
+        }
+    }
+}
+
+// MARK: - CrewMember
+
+struct CrewMember: Identifiable, Codable, Hashable {
+    let id: UUID
+    var name: String
+    var role: String
+
+    init(name: String = "", role: String = "") {
+        self.id   = UUID()
+        self.name = name
+        self.role = role
+    }
+
+    var displayString: String {
+        role.isEmpty ? name : "\(name) — \(role)"
+    }
+}
+
+// MARK: - CastMember
+// Project-wide mapping of actor to character name.
+
+struct CastMember: Identifiable, Codable, Hashable {
+    let id: UUID
+    var actorName:     String   // e.g. "Jake Nuttbrock"
+    var characterName: String   // e.g. "Blake"
+
+    init(actorName: String = "", characterName: String = "") {
+        self.id            = UUID()
+        self.actorName     = actorName
+        self.characterName = characterName
+    }
+
+    var displayString: String {
+        actorName.isEmpty ? characterName : "\(actorName) — \(characterName)"
+    }
+}
+
+// MARK: - ProductionInfo
+// Project-wide fields filled in once, saved with ProjectData.
+
+struct ProductionInfo: Codable {
+    var companyName:   String
+    var directorName:  String
+    var contactNumber: String
+    var crew:          [CrewMember]
+    var castList:      [CastMember]   // actor → character mappings
+
+    init(
+        companyName:   String = "",
+        directorName:  String = "",
+        contactNumber: String = "",
+        crew:          [CrewMember] = [],
+        castList:      [CastMember] = []
+    ) {
+        self.companyName   = companyName
+        self.directorName  = directorName
+        self.contactNumber = contactNumber
+        self.crew          = crew
+        self.castList      = castList
+    }
+}
+
 // MARK: - ShootDay
 
 struct ShootDay: Identifiable, Codable {
     let id: UUID
     var date: Date
     var scenes: [Scene] = []
-    var locationName:    String = ""   // e.g. "Owen's Farmhouse"
-    var locationAddress: String = ""   // e.g. "123 Rural Rd, Whitefish MT"
+    var callSheet: CallSheetData = CallSheetData()
 
-    init(date: Date, scenes: [Scene] = [], locationName: String = "", locationAddress: String = "") {
-        self.id              = UUID()
-        self.date            = date
-        self.scenes          = scenes
-        self.locationName    = locationName
-        self.locationAddress = locationAddress
+    init(date: Date, scenes: [Scene] = [], callSheet: CallSheetData = CallSheetData()) {
+        self.id        = UUID()
+        self.date      = date
+        self.scenes    = scenes
+        self.callSheet = callSheet
     }
 
     var totalDuration: Int      { scenes.reduce(0) { $0 + $1.duration } }
@@ -104,9 +221,16 @@ struct ShootDay: Identifiable, Codable {
     var totalDayDuration:   Int { dayScenes.reduce(0)   { $0 + $1.duration } }
     var totalNightDuration: Int { nightScenes.reduce(0) { $0 + $1.duration } }
 
-    /// All unique cast members appearing across this day's scenes, sorted alphabetically.
+    /// Auto-pulled cast from all scenes this day, sorted alphabetically.
     var allCast: [String] {
         Array(Set(scenes.flatMap { $0.cast })).sorted()
+    }
+
+    /// True if the call sheet has any meaningful data entered.
+    var hasCallSheetData: Bool {
+        !callSheet.generalCallTime.isEmpty ||
+        !callSheet.locations.isEmpty ||
+        !callSheet.notes.isEmpty
     }
 }
 
@@ -116,21 +240,24 @@ struct ProjectData: Codable {
     var allScenes: [Scene]
     var shootDays: [ShootDay]
     var projectTitle: String
-    var createdDate: Date          // set once at creation, never overwritten on re-save
+    var createdDate: Date
     var isShiftModeEnabled: Bool?
+    var productionInfo: ProductionInfo?   // optional for backwards compatibility
 
     init(
         allScenes: [Scene],
         shootDays: [ShootDay],
         projectTitle: String = "Untitled Movie",
         isShiftModeEnabled: Bool? = false,
-        createdDate: Date = Date()  // pass existing date on re-save to preserve it
+        createdDate: Date = Date(),
+        productionInfo: ProductionInfo? = nil
     ) {
         self.allScenes          = allScenes
         self.shootDays          = shootDays
         self.projectTitle       = projectTitle
         self.createdDate        = createdDate
         self.isShiftModeEnabled = isShiftModeEnabled
+        self.productionInfo     = productionInfo
     }
 }
 
