@@ -29,6 +29,7 @@ struct ContentView: View {
     @State var projectTitle: String = "Untitled Movie"
     @State var isShiftModeEnabled: Bool = false
     @State var projectCreatedDate: Date = Date()  // preserved across saves; never reset on re-save
+    @State var productionInfo: ProductionInfo = ProductionInfo()
 
     // Auto-save: flip to true on any change; a debounced .onChange triggers the actual write
     @State var hasUnsavedChanges: Bool = false
@@ -38,8 +39,6 @@ struct ContentView: View {
     @State private var newDuration:   String = ""
     @State private var newEstimate:   String = ""
 
-    @State var showingFileImporter      = false
-    @State var showingPDFExporter       = false
     @State var showingAlert             = false
     @State var showingImportAlert       = false
     @State private var showingClearAllConfirmation = false
@@ -48,7 +47,6 @@ struct ContentView: View {
     @State var alertMessage:   String = ""
     @State var importMessage:  String = ""
     @State private var importedScenesCount = 0
-    @State private var fileImportType: FileImportType = .json
 
     // Unscheduled-scene editing
     @State private var editingUnscheduledScene:      Scene?
@@ -57,7 +55,8 @@ struct ContentView: View {
     // Appearance
     @State var isDarkMode: Bool = false
 
-    enum FileImportType { case json, fdx }
+    // Production Setup sheet
+    @State private var showingProductionSetup = false
 
     // MARK: - Computed statistics
 
@@ -75,27 +74,6 @@ struct ContentView: View {
             detailView
         }
         .preferredColorScheme(isDarkMode ? .dark : .light)
-        .fileExporter(
-            isPresented: $showingPDFExporter,
-            document: PDFFile(
-                shootDays: shootDays,
-                projectTitle: projectTitle,
-                allScenes: allScenes,
-                startDate: startDate,
-                endDate: endDate
-            ),
-            contentType: .pdf,
-            defaultFilename: sanitizeFilename("\(projectTitle.isEmpty ? "MovieSchedule" : projectTitle)_Calendar")
-        ) { handlePDFExportResult($0) }
-        .fileImporter(
-            isPresented: $showingFileImporter,
-            allowedContentTypes: fileImportType == .json ? [.json] : [.fdx, .xml],
-            allowsMultipleSelection: false
-        ) { result in
-            DispatchQueue.main.async {
-                fileImportType == .json ? handleLoadResult(result) : handleFDXImport(result)
-            }
-        }
         .alert("Script Import",  isPresented: $showingImportAlert) { Button("OK") {} } message: { Text(importMessage) }
         .alert("CineSched",      isPresented: $showingAlert)        { Button("OK") {} } message: { Text(alertMessage) }
         .confirmationDialog("Clear All Scenes", isPresented: $showingClearAllConfirmation, titleVisibility: .visible) {
@@ -105,8 +83,15 @@ struct ContentView: View {
             Text("This will remove all scenes from your calendar and boneyard. This action cannot be undone.")
         }
         .sheet(isPresented: $showingUnscheduledSceneEditSheet) { unscheduledEditSheet }
-        .onChange(of: showingUnscheduledSceneEditSheet) { _, isShowing in
+        .onChange(of: showingUnscheduledSceneEditSheet) { isShowing in
             if !isShowing { clearUnscheduledEditingState() }
+        }
+        .sheet(isPresented: $showingProductionSetup) {
+            ProductionSetupSheet(
+                productionInfo: $productionInfo,
+                isPresented: $showingProductionSetup,
+                onSave: { markDirty() }
+            )
         }
         .onAppear {
             loadDefaultProject()
@@ -130,7 +115,7 @@ struct ContentView: View {
             TextField("Movie Title", text: $projectTitle)
                 .font(.title2)
                 .padding(.bottom, 2)
-                .onChange(of: projectTitle) { _, _ in markDirty() }
+                .onChange(of: projectTitle) { _ in markDirty() }
 
             Text("Shoot Days: \(shootDays.filter { !$0.scenes.isEmpty }.count)")
                 .font(.subheadline).foregroundColor(.gray)
@@ -146,14 +131,14 @@ struct ContentView: View {
             Group {
                 Text("Select Date Range").font(.headline)
                 DatePicker("Start Date", selection: $startDate, displayedComponents: .date)
-                    .onChange(of: startDate) { _, _ in markDirty() }
+                    .onChange(of: startDate) { _ in markDirty() }
                 DatePicker("End Date", selection: $endDate, displayedComponents: .date)
-                    .onChange(of: endDate) { _, _ in markDirty() }
+                    .onChange(of: endDate) { _ in markDirty() }
 
                 Toggle(isOn: $isShiftModeEnabled) { Text("Shift Schedule") }
                     .toggleStyle(.switch)
                     .help("When enabled, changing the Start Date shifts all scenes on the calendar.")
-                    .onChange(of: isShiftModeEnabled) { _, _ in markDirty() }
+                    .onChange(of: isShiftModeEnabled) { _ in markDirty() }
 
                 Button("Update Calendar") { updateShootDays(from: startDate, to: endDate) }
                     .padding(.top, 5)
@@ -246,7 +231,11 @@ struct ContentView: View {
                 updateScene:  updateScene,
                 removeScene:  removeScene,
                 projectTitle: projectTitle,
-                onSceneChanged: { markDirty() }
+                productionInfo: productionInfo,
+                onSceneChanged: { markDirty() },
+                onCallSheetExport: { day in
+                    showCallSheetPDFSavePanel(for: day)
+                }
             )
         }
         .padding()
@@ -260,17 +249,21 @@ struct ContentView: View {
                 Button("New") { showingClearAllConfirmation = true }
                     .buttonStyle(.bordered).foregroundColor(.red)
 
-                Button("Import Script") { fileImportType = .fdx; showingFileImporter = true }
+                Button("Import Script") { showFDXOpenPanel() }
                     .buttonStyle(.bordered)
                     .help("Import scenes from Final Draft (.fdx)")
+
+                Button("Production Setup") { showingProductionSetup = true }
+                    .buttonStyle(.bordered)
+                    .help("Set production company, director, contact, and crew for call sheets")
 
                 Button("Save") { showNativeSaveDialog() }
                     .buttonStyle(.bordered)
 
-                Button("Load") { fileImportType = .json; showingFileImporter = true }
+                Button("Load") { showJSONOpenPanel() }
                     .buttonStyle(.bordered)
 
-                Button("Export PDF") { showingPDFExporter = true }
+                Button("Export PDF") { showSchedulePDFSavePanel() }
                     .buttonStyle(.borderedProminent)
 
                 Button {
@@ -418,67 +411,4 @@ struct ContentView: View {
         shootDays = updated
         markDirty()
     }
-
-    // MARK: - File import handlers
-
-    private func handleLoadResult(_ result: Result<[URL], Error>) {
-        switch result {
-        case .success(let urls):
-            guard let url = urls.first else { alertMessage = "No file selected."; showingAlert = true; return }
-            loadProject(from: url)
-        case .failure(let error):
-            alertMessage = "Failed to select file: \(error.localizedDescription)"; showingAlert = true
-        }
-    }
-
-    private func handleFDXImport(_ result: Result<[URL], Error>) {
-        switch result {
-        case .success(let urls):
-            guard let url = urls.first else { importMessage = "No file selected."; showingImportAlert = true; return }
-            importFDXScript(from: url)
-        case .failure(let error):
-            importMessage = "Failed to select file: \(error.localizedDescription)"; showingImportAlert = true
-        }
-    }
-
-    private func handlePDFExportResult(_ result: Result<URL, Error>) {
-        switch result {
-        case .success(let url):
-            alertMessage = "PDF exported to: \(url.lastPathComponent)"; showingAlert = true
-        case .failure(let error):
-            alertMessage = "Failed to export PDF: \(error.localizedDescription)"; showingAlert = true
-        }
-    }
-
-    private func importFDXScript(from url: URL) {
-        guard url.startAccessingSecurityScopedResource() else {
-            importMessage = "Unable to access the selected file."; showingImportAlert = true; return
-        }
-        defer { url.stopAccessingSecurityScopedResource() }
-
-        do {
-            let parsed = try FinalDraftParser.parseScenes(from: url)
-            guard !parsed.isEmpty else {
-                importMessage = "No scenes found in the script."; showingImportAlert = true; return
-            }
-            var count = 0
-            for ps in parsed {
-                let type: DayNightType = ps.timeOfDay == .night ? .night : .day
-                allScenes.append(Scene(
-                    title:         "\(ps.sceneNumber). \(ps.location)",
-                    duration:      1,
-                    estimatedTime: 15,
-                    dayNightType:  type
-                ))
-                count += 1
-            }
-            markDirty()
-            importedScenesCount = count
-            importMessage = "Imported \(count) scene\(count == 1 ? "" : "s") from '\(url.lastPathComponent)'.\n\nScenes added to Boneyard with default values (1/8 page, 15 min). Edit before scheduling."
-            showingImportAlert = true
-        } catch {
-            importMessage = "Failed to import script: \(error.localizedDescription)"; showingImportAlert = true
-        }
-    }
 }
-
