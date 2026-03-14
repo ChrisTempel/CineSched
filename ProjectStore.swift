@@ -84,7 +84,8 @@ extension ContentView {
             shootDays: shootDays,
             projectTitle: projectTitle,
             isShiftModeEnabled: isShiftModeEnabled,
-            createdDate: projectCreatedDate   // preserve original creation date
+            createdDate: projectCreatedDate,
+            productionInfo: productionInfo
         )
         do {
             let data = try ProjectFile.encode(projectData)
@@ -131,7 +132,8 @@ extension ContentView {
             shootDays: shootDays,
             projectTitle: projectTitle,
             isShiftModeEnabled: isShiftModeEnabled,
-            createdDate: projectCreatedDate   // preserve original creation date
+            createdDate: projectCreatedDate,
+            productionInfo: productionInfo
         )
         do {
             let data = try ProjectFile.encode(projectData)
@@ -177,7 +179,8 @@ extension ContentView {
             shootDays          = loaded.shootDays
             projectTitle       = loaded.projectTitle
             isShiftModeEnabled = loaded.isShiftModeEnabled ?? false
-            projectCreatedDate = loaded.createdDate        // restore the original date
+            projectCreatedDate = loaded.createdDate
+            productionInfo     = loaded.productionInfo ?? ProductionInfo()
             if let first = shootDays.first?.date, let last = shootDays.last?.date {
                 startDate = first
                 endDate   = last
@@ -232,5 +235,134 @@ extension ContentView {
         name.components(separatedBy: .init(charactersIn: "/\\:*?\"<>|"))
             .joined(separator: "_")
             .replacingOccurrences(of: " ", with: "_")
+    }
+
+    // MARK: - File open panels
+
+    func showJSONOpenPanel() {
+        let panel = NSOpenPanel()
+        panel.title                = "Load CineSched Project"
+        panel.prompt               = "Load"
+        panel.allowedContentTypes  = [.json]
+        panel.allowsMultipleSelection = false
+        panel.canChooseDirectories = false
+        panel.begin { [self] response in
+            DispatchQueue.main.async {
+                guard response == .OK, let url = panel.url else { return }
+                self.loadProject(from: url)
+            }
+        }
+    }
+
+    func showFDXOpenPanel() {
+        let panel = NSOpenPanel()
+        panel.title                = "Import Final Draft Script"
+        panel.prompt               = "Import"
+        panel.allowedContentTypes  = [.init(importedAs: "com.finaldraft.fdx"), .xml]
+        panel.allowsMultipleSelection = false
+        panel.canChooseDirectories = false
+        panel.begin { [self] response in
+            DispatchQueue.main.async {
+                guard response == .OK, let url = panel.url else { return }
+                self.importFDXScript(from: url)
+            }
+        }
+    }
+
+    func importFDXScript(from url: URL) {
+        guard url.startAccessingSecurityScopedResource() else {
+            importMessage = "Unable to access the selected file."
+            showingImportAlert = true
+            return
+        }
+        defer { url.stopAccessingSecurityScopedResource() }
+
+        do {
+            let parsed = try FinalDraftParser.parseScenes(from: url)
+            guard !parsed.isEmpty else {
+                importMessage = "No scenes found in the script."
+                showingImportAlert = true
+                return
+            }
+            var count = 0
+            for ps in parsed {
+                let type: DayNightType = ps.timeOfDay == .night ? .night : .day
+                allScenes.append(Scene(
+                    title:         "\(ps.sceneNumber). \(ps.location)",
+                    duration:      1,
+                    estimatedTime: 15,
+                    dayNightType:  type
+                ))
+                count += 1
+            }
+            markDirty()
+            importMessage = "Imported \(count) scene\(count == 1 ? "" : "s") from '\(url.lastPathComponent)'.\n\nScenes added to Boneyard with default values (1/8 page, 15 min). Edit before scheduling."
+            showingImportAlert = true
+        } catch {
+            importMessage = "Failed to import script: \(error.localizedDescription)"
+            showingImportAlert = true
+        }
+    }
+
+    // MARK: - PDF exports (NSSavePanel)
+
+    func showSchedulePDFSavePanel() {
+        guard let pdfData = PDFExporter.generatePDF(
+            shootDays: shootDays,
+            projectTitle: projectTitle,
+            allScenes: allScenes,
+            startDate: startDate,
+            endDate: endDate
+        ) else {
+            alertMessage = "Failed to generate schedule PDF."
+            showingAlert = true
+            return
+        }
+        showPDFSavePanel(
+            data: pdfData,
+            defaultName: sanitizeFilename("\(projectTitle.isEmpty ? "MovieSchedule" : projectTitle)_Calendar")
+        )
+    }
+
+    func showCallSheetPDFSavePanel(for day: ShootDay) {
+        guard let pdfData = CallSheetExporter.generatePDF(
+            shootDay: day,
+            productionInfo: productionInfo,
+            projectTitle: projectTitle
+        ) else {
+            alertMessage = "Failed to generate call sheet PDF."
+            showingAlert = true
+            return
+        }
+        showPDFSavePanel(
+            data: pdfData,
+            defaultName: sanitizeFilename("CallSheet_\(formattedDate(day.date))")
+        )
+    }
+
+    private func showPDFSavePanel(data: Data, defaultName: String) {
+        let panel = NSSavePanel()
+        panel.title              = "Export PDF"
+        panel.prompt             = "Export"
+        panel.nameFieldStringValue = defaultName
+        panel.allowedContentTypes  = [.pdf]
+        panel.canCreateDirectories = true
+        panel.isExtensionHidden    = false
+        if let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first {
+            panel.directoryURL = docs
+        }
+        panel.begin { [self] response in
+            DispatchQueue.main.async {
+                guard response == .OK, let url = panel.url else { return }
+                do {
+                    try data.write(to: url)
+                    self.alertMessage = "PDF exported to: \(url.lastPathComponent)"
+                    self.showingAlert = true
+                } catch {
+                    self.alertMessage = "Failed to export PDF: \(error.localizedDescription)"
+                    self.showingAlert = true
+                }
+            }
+        }
     }
 }
