@@ -79,6 +79,7 @@ struct SceneEditSheet: View {
                     Text("Scene Summary").font(.headline)
                     TextEditor(text: $editSummary)
                         .frame(minHeight: 100)
+                        .padding(6)
                         .border(Color.gray.opacity(0.3), width: 1)
                         .cornerRadius(4)
                 }
