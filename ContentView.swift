@@ -80,7 +80,7 @@ struct ContentView: View {
             Button("Clear All", role: .destructive) { clearAllScenes() }
             Button("Cancel",    role: .cancel)      {}
         } message: {
-            Text("This will remove all scenes from your calendar and boneyard. This action cannot be undone.")
+            Text("This will clear all scenes, call sheets, and the project title. This action cannot be undone.")
         }
         .sheet(isPresented: $showingUnscheduledSceneEditSheet) { unscheduledEditSheet }
         .onChange(of: showingUnscheduledSceneEditSheet) { isShowing in
@@ -249,13 +249,13 @@ struct ContentView: View {
                 Button("New") { showingClearAllConfirmation = true }
                     .buttonStyle(.bordered).foregroundColor(.red)
 
-                Button("Import Script") { showFDXOpenPanel() }
-                    .buttonStyle(.bordered)
-                    .help("Import scenes from Final Draft (.fdx)")
-
                 Button("Production Setup") { showingProductionSetup = true }
                     .buttonStyle(.bordered)
                     .help("Set production company, director, contact, and crew for call sheets")
+
+                Button("Import Script") { showFDXOpenPanel() }
+                    .buttonStyle(.bordered)
+                    .help("Import scenes from Final Draft (.fdx)")
 
                 Button("Save") { showNativeSaveDialog() }
                     .buttonStyle(.bordered)
