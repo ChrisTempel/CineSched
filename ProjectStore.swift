@@ -227,7 +227,13 @@ extension ContentView {
 
     func clearAllScenes() {
         allScenes.removeAll()
-        for i in shootDays.indices { shootDays[i].scenes.removeAll() }
+        for i in shootDays.indices {
+            shootDays[i].scenes    = []
+            shootDays[i].callSheet = CallSheetData()
+        }
+        projectTitle       = "Untitled Movie"
+        productionInfo     = ProductionInfo()
+        projectCreatedDate = Date()
         markDirty()
     }
 
