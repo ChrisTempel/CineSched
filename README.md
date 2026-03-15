@@ -2,6 +2,9 @@
 
 A macOS application for scheduling film shoots with visual calendar layouts, scene management, and Final Draft script import.
 
+Video Demo:
+https://youtu.be/UVjkRQHj8JU
+
 ![Platform](https://img.shields.io/badge/platform-macOS-blue)
 ![Swift](https://img.shields.io/badge/Swift-5.0-orange)
 ![SwiftUI](https://img.shields.io/badge/SwiftUI-4.0-green)
