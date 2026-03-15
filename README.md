@@ -5,7 +5,7 @@ A macOS application for scheduling film shoots with visual calendar layouts, sce
 ![Platform](https://img.shields.io/badge/platform-macOS-blue)
 ![Swift](https://img.shields.io/badge/Swift-5.0-orange)
 ![SwiftUI](https://img.shields.io/badge/SwiftUI-4.0-green)
-![Version](https://img.shields.io/badge/version-2.5-purple)
+![Version](https://img.shields.io/badge/version-3.1-purple)
 ![License](https://img.shields.io/badge/license-GPL--v3-lightgrey)
 
 > **Free for the film community.** Built by a filmmaker, for filmmakers. If you find it useful, the best way to say thanks is to share it. If you're a developer who wants to build a Windows version, [read this](#windows--cross-platform).
@@ -14,13 +14,14 @@ A macOS application for scheduling film shoots with visual calendar layouts, sce
 
 ## Features
 
-### Visual Calendar Scheduling
+### 📅 Visual Calendar Scheduling
 - Drag-and-drop scene strips onto calendar days
 - Color-coded day/night scenes (white for day, gray for night)
 - Dynamic week rows that adjust based on scene count
 - Automatic totals for page count and estimated time per day
+- Drag entire days (scenes + call sheet) to reschedule — swaps content if target day is occupied
 
-### Scene Management
+### 🎬 Scene Management
 - Create scenes with custom titles, durations, and time estimates
 - Day/Night classification for each scene
 - "Boneyard" sidebar for unscheduled scenes
@@ -28,25 +29,38 @@ A macOS application for scheduling film shoots with visual calendar layouts, sce
 - Flexible duration input (pages in eighths: "1 7/8", "15", etc.)
 - Flexible time input (hours or minutes: "4", "2:30", "15")
 
-### Final Draft Script Import
+### 📄 Final Draft Script Import
 - Import `.fdx` files directly from Final Draft
 - Automatic scene number extraction
 - Location parsing (INT./EXT.)
 - Auto-detection of time of day (DAY/NIGHT/MORNING/EVENING/etc.)
 - All scene headings automatically capitalized
-- Scenes added to Boneyard with default values (1 page, 4 hours)
+- Scenes added to Boneyard with default values
 
-### Export & Statistics
-- Export calendar as PDF with professional layout
+### 📋 Call Sheets
+- Click any date header to open the call sheet editor for that day
+- Per-day fields: general call time, multiple locations, cast, and free-form notes
+- Cast auto-pulled from scheduled scenes, fully editable
+- Actor → character lookup: enter `Jake Nuttbrock — Blake` in Production Setup and the call sheet resolves character names to full actor credits automatically
+- Export professional PDF call sheets — header, locations, scene breakdown, cast, crew, and notes
+- Blue dot indicator on date headers when a call sheet has data
+
+### 🎥 Production Setup
+- Project-wide panel for company name, director, and contact number
+- Cast list with actor → character mappings (used for call sheet auto-lookup)
+- Crew list with name and role
+
+### 📊 Export & Statistics
+- Export schedule as PDF with professional calendar layout
+- Export call sheets as PDF (one per shoot day)
 - Real-time statistics: shoot days, total scenes, total pages, estimated time
-- Compact toolbar with all key info visible
 
-### Auto-Save
-- Automatic project saving to UserDefaults
-- No need to manually save - your work is always preserved
-- Manual save/load for sharing projects
+### 💾 Auto-Save
+- Automatic project saving after any change
+- Manual save/load for sharing projects as `.json` files
+- "New" fully resets the project — clears all scenes, call sheets, title, and production info
 
-### Customization
+### 🎨 Customization
 - Dark/Light mode toggle
 - Adjustable date ranges
 - Shift schedule or lock scenes to dates
@@ -136,8 +150,8 @@ A macOS application for scheduling film shoots with visual calendar layouts, sce
 - `2.5` = 2.5 pages (converts to eighths)
 
 ### Estimated Time
-- `4` = 4 hours (numbers ≤14 default to hours)
-- `15` = 15 minutes (numbers >14 default to minutes)
+- `4` = 4 hours (numbers ≤10 default to hours)
+- `15` = 15 minutes (numbers >10 default to minutes)
 - `2:30` = 2 hours 30 minutes
 - `0:45` = 45 minutes
 
@@ -166,14 +180,17 @@ From a scene heading like: **"3. EXT. WOODS - DAY"**
 ```
 CineSched/
 ├── CineSchedApp.swift         # App entry point
-├── Models.swift               # Data types: Scene, ShootDay, ProjectData
+├── Models.swift               # Data types: Scene, ShootDay, ProjectData, CallSheetData, ProductionInfo
 ├── Parsers.swift              # FractionParser and TimeParser utilities
 ├── Formatting.swift           # Shared date/time/page formatting helpers
 ├── FinalDraftParser.swift     # FDX script file parsing
-├── PDFExporter.swift          # PDF generation + PDFFile document wrapper
-├── ProjectStore.swift         # Save, load, auto-save, and persistence logic
+├── PDFExporter.swift          # Schedule PDF generation
+├── CallSheetExporter.swift    # Call sheet PDF generation
+├── ProjectStore.swift         # Save, load, auto-save, and all file operations
 ├── ContentView.swift          # Root view: state, toolbar, sidebar wiring
-├── CalendarView.swift         # Calendar grid, drag-and-drop, SceneCardView
+├── CalendarView.swift         # Calendar grid, drag-and-drop scenes and days
+├── CallSheetEditor.swift      # Per-day call sheet editor sheet
+├── ProductionSetupSheet.swift # Project-wide production info panel
 ├── SceneEditSheet.swift       # Modal sheet for editing a scene
 ├── NewSceneInputView.swift    # Sidebar form for adding new scenes
 └── README.md                  # This file
@@ -202,13 +219,18 @@ Import scripts directly from Final Draft:
    - Group similar locations together on the calendar
    - Use day/night color coding to balance your schedule
 
-2. **PDF Export Tips**
+2. **Keyboard Shortcuts**
+   - `⌘S` - Save (triggers native save dialog)
+   - `⌘N` - New project
+   - `⌘,` - Preferences (if implemented)
+
+3. **PDF Export Tips**
    - Tight row heights maximize page usage
    - Scene titles truncate with "..." if too long
    - Totals always align at bottom for easy scanning
    - Weekends included for complete view
 
-3. **Scene Naming Best Practices**
+4. **Scene Naming Best Practices**
    - Keep titles concise for PDF readability
    - Use consistent location names (e.g., always "OWENS HOUSE" not "Owen's house")
    - Include scene numbers in title for easy reference
