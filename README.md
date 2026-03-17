@@ -5,26 +5,28 @@ A macOS application for scheduling film shoots with visual calendar layouts, sce
 ![Platform](https://img.shields.io/badge/platform-macOS-blue)
 ![Swift](https://img.shields.io/badge/Swift-5.0-orange)
 ![SwiftUI](https://img.shields.io/badge/SwiftUI-4.0-green)
-![Version](https://img.shields.io/badge/version-3.1-purple)
+![Version](https://img.shields.io/badge/version-3.2-purple)
 ![License](https://img.shields.io/badge/license-GPL--v3-lightgrey)
 
 > **Free for the film community.** Built by a filmmaker, for filmmakers. If you find it useful, the best way to say thanks is to share it. If you're a developer who wants to build a Windows version, [read this](#windows--cross-platform).
 
-> **Free for the film community.** Built by a filmmaker, for filmmakers. If you find it useful, the best way to say thanks is to share it. If you're a developer who wants to build a Windows version, [read this](#windows--cross-platform).
+## Demo
+
+▶️ [Watch the demo on YouTube](https://youtu.be/UVjkRQHj8JU)
 
 ## Features
 
 ### 📅 Visual Calendar Scheduling
 - Drag-and-drop scene strips onto calendar days
-- Color-coded day/night scenes (white for day, gray for night)
+- Color-coded scene types: orange for day, blue for night, red for custom (company moves, etc.)
 - Dynamic week rows that adjust based on scene count
 - Automatic totals for page count and estimated time per day
 - Drag entire days (scenes + call sheet) to reschedule — swaps content if target day is occupied
 
 ### 🎬 Scene Management
 - Create scenes with custom titles, durations, and time estimates
-- Day/Night classification for each scene
-- "Boneyard" sidebar for unscheduled scenes
+- Day, Night, or Custom type for each scene — Custom strips require only a title, page count and time are optional
+- "Boneyard" sidebar for unscheduled scenes with sort options: Location, INT/EXT, Cast, Day/Night, or Default
 - Double-click to edit any scene
 - Flexible duration input (pages in eighths: "1 7/8", "15", etc.)
 - Flexible time input (hours or minutes: "4", "2:30", "15")
@@ -42,17 +44,18 @@ A macOS application for scheduling film shoots with visual calendar layouts, sce
 - Per-day fields: general call time, multiple locations, cast, and free-form notes
 - Cast auto-pulled from scheduled scenes, fully editable
 - Actor → character lookup: enter `Jake Nuttbrock — Blake` in Production Setup and the call sheet resolves character names to full actor credits automatically
+- **Per-day crew selection** — choose from your roster with checkboxes; daily defaults arrive pre-checked, specialty crew can be added as needed, and any default can be unchecked if not needed that day
 - Export professional PDF call sheets — header, locations, scene breakdown, cast, crew, and notes
 - Blue dot indicator on date headers when a call sheet has data
 
 ### 🎥 Production Setup
 - Project-wide panel for company name, director, and contact number
 - Cast list with actor → character mappings (used for call sheet auto-lookup)
-- Crew list with name and role
+- Crew list with name, role, and a **Daily** checkbox — crew marked Daily are pre-populated on every call sheet
 
 ### 📊 Export & Statistics
 - Export schedule as PDF with professional calendar layout
-- Export call sheets as PDF (one per shoot day)
+- Export call sheets as PDF (one per shoot day) — crew section reflects exactly who was called that day
 - Real-time statistics: shoot days, total scenes, total pages, estimated time
 
 ### 💾 Auto-Save
@@ -88,29 +91,51 @@ A macOS application for scheduling film shoots with visual calendar layouts, sce
    - Toggle "Shift Schedule" if you want scenes to move when you change dates
    - Click "Update Calendar" to generate your schedule
 
-3. **Add Scenes**
+3. **Set Up Production Info** *(optional but recommended)*
+   - Click **Production Setup** in the toolbar
+   - Enter company name, director, and contact number
+   - Add your crew — check "Daily" for anyone on set every day
+   - Add cast with actor → character mappings for automatic call sheet lookup
+
+4. **Add Scenes**
    - **Manual Entry**: Use the "New Scene" section in the sidebar
      - Enter scene title (e.g., "3. INT. KITCHEN - DAY")
      - Enter duration in pages (e.g., "1 7/8", "2", "15" for 15/8ths)
-     - Enter estimated time (e.g., "4" for 4 hours, "2:30" for 2.5 hours, "15" for 15 minutes).  Less than "14" is interpreted as hours.  "15" and greater is minutes.  
-     - Select Day or Night
+     - Enter estimated time (e.g., "4" for 4 hours, "2:30" for 2.5 hours, "15" for 15 minutes). Less than "14" is interpreted as hours. "15" and greater is minutes.
+     - Select Day, Night, or Custom (for company moves, meal breaks, etc.)
      - Click "Add Scene"
-   
-   - **Import from Script**: 
+
+   - **Import from Script**:
      - Click "Import Script" button
      - Select your Final Draft `.fdx` file
      - All scenes automatically appear in the Boneyard
      - Edit page counts and times as needed
 
-4. **Schedule Scenes**
+5. **Sort the Boneyard** *(optional)*
+   - Use the sort menu next to the Boneyard heading to group scenes by Location, INT/EXT, Cast, or Day/Night
+   - Default order is always available to restore the original sequence
+   - Sorting is display-only and does not affect scheduling
+
+6. **Schedule Scenes**
    - Drag scenes from the Boneyard onto calendar days
-   - Scenes show their title, with day scenes in white boxes, night scenes in gray
+   - Day scenes appear in white boxes, night in gray, custom in a red-outlined box
    - Daily totals appear at the bottom of each day
 
-5. **Edit Scenes**
+7. **Edit Scenes**
    - Double-click any scene (scheduled or in Boneyard) to edit
-   - Update title, duration, time, or day/night setting
+   - Update title, duration, time, or type
    - Delete scenes from the edit sheet if needed
+
+### Building Call Sheets
+
+1. Click any **date header** on the calendar to open that day's call sheet editor
+2. Set the general call time, locations, and notes
+3. Cast is auto-pulled from the scenes scheduled that day — edit as needed
+4. Crew shows your full roster as checkboxes:
+   - Daily crew arrive pre-checked — uncheck anyone not needed that day
+   - Specialty crew arrive unchecked — check anyone needed that day
+   - Type a name in the one-off field for crew not in your roster
+5. Click **Save** or **Export PDF** to generate the call sheet
 
 ### Exporting Your Schedule
 
@@ -133,12 +158,13 @@ A macOS application for scheduling film shoots with visual calendar layouts, sce
 ## Button Reference
 
 **Toolbar Buttons (left to right):**
-1. **New** (red) - Clear all scenes and start fresh
-2. **Import Script** - Import Final Draft `.fdx` file
-3. **Save** - Export project as JSON file
-4. **Load** - Import saved project
-5. **Export PDF** (blue) - Generate calendar PDF
-6. **Light/Dark** - Toggle appearance mode
+1. **New** (red) — Clear all scenes and start fresh
+2. **Production Setup** — Set production company, director, contact, cast, and crew
+3. **Import Script** — Import scenes from a Final Draft `.fdx` file
+4. **Save** — Export project as `.json` file
+5. **Load** — Import a saved project
+6. **Export PDF** (blue) — Generate calendar PDF
+7. **Light/Dark** — Toggle appearance mode
 
 ## Duration & Time Input Examples
 
@@ -171,7 +197,7 @@ From a scene heading like: **"3. EXT. WOODS - DAY"**
 
 ### After Import
 - All scenes appear in the Boneyard
-- Default values: 1 page (8/8ths), 4 hours
+- Default values: 1/8 page, 15 min
 - Edit scenes to set accurate page counts and times
 - Drag to schedule on calendar
 
@@ -192,8 +218,7 @@ CineSched/
 ├── CallSheetEditor.swift      # Per-day call sheet editor sheet
 ├── ProductionSetupSheet.swift # Project-wide production info panel
 ├── SceneEditSheet.swift       # Modal sheet for editing a scene
-├── NewSceneInputView.swift    # Sidebar form for adding new scenes
-└── README.md                  # This file
+└── NewSceneInputView.swift    # Sidebar form for adding new scenes
 ```
 
 ## File Formats
@@ -201,9 +226,9 @@ CineSched/
 ### Project Files (.json)
 Save and share your schedules as JSON files containing:
 - All scenes (scheduled and unscheduled)
-- Calendar days with assigned scenes
+- Calendar days with assigned scenes and call sheet data
 - Project title and settings
-- Date range information
+- Production info (crew, cast, company details)
 
 ### Final Draft Scripts (.fdx)
 Import scripts directly from Final Draft:
@@ -214,15 +239,14 @@ Import scripts directly from Final Draft:
 ## Tips & Tricks
 
 1. **Efficient Workflow**
-   - Import your script first
-   - Edit page counts in batches (double-click each scene)
-   - Group similar locations together on the calendar
-   - Use day/night color coding to balance your schedule
+   - Import your script first, then set up Production Setup before building call sheets
+   - Edit page counts in batches (double-click each scene in the Boneyard)
+   - Use the Location sort in the Boneyard to cluster scenes by place before scheduling
+   - Use Custom strips for company moves so they stand out on the calendar and print clearly on B&W
 
 2. **Keyboard Shortcuts**
-   - `⌘S` - Save (triggers native save dialog)
-   - `⌘N` - New project
-   - `⌘,` - Preferences (if implemented)
+   - `⌘S` — Save (triggers native save dialog)
+   - `⌘N` — New project
 
 3. **PDF Export Tips**
    - Tight row heights maximize page usage
@@ -233,13 +257,14 @@ Import scripts directly from Final Draft:
 4. **Scene Naming Best Practices**
    - Keep titles concise for PDF readability
    - Use consistent location names (e.g., always "OWENS HOUSE" not "Owen's house")
-   - Include scene numbers in title for easy reference
+   - Include scene numbers in the title for easy reference (imported scenes do this automatically)
 
 ## Known Limitations
 
-- PDF exports are landscape US Letter (792 x 612 pts)
-- Very long scene titles will truncate (ellipsis added)
-- Scene strips have a maximum of ~160px row height
+- Schedule PDF exports are landscape US Letter (792 x 612 pts)
+- Call sheet PDF exports are portrait US Letter (612 x 792 pts)
+- Very long scene titles will truncate in the calendar and PDF (ellipsis added)
+- Scene strips have a maximum of ~160px row height in the calendar PDF
 
 ## Troubleshooting
 
@@ -265,22 +290,13 @@ Import scripts directly from Final Draft:
 
 ## Future Enhancement Ideas
 
+- [ ] Days Out of Days report
+- [ ] Location color coding on the calendar
 - [ ] Multi-select scenes for batch operations
 - [ ] Copy/paste scenes between days
-- [ ] Print directly from app (without PDF step)
 - [ ] Export to CSV/Excel
-- [ ] Cast lists per scene
-- [ ] Location grouping and color coding
-- [ ] Budget tracking per scene
-- [ ] Integration with other screenwriting tools
-
-## Windows / Cross-Platform
-
-CineSched is currently macOS-only, but the `.json` project format is simple and portable by design. A Windows developer who wants to build a compatible version — using Electron, Flutter, or Avalonia — would be able to read and write the same save files. See [CONTRIBUTING.md](CONTRIBUTING.md) for more detail.
-
-## Contributing
-
-Contributions are welcome — bug fixes, new features, documentation, or a Windows port. See [CONTRIBUTING.md](CONTRIBUTING.md) to get started.
+- [ ] iCloud sync
+- [ ] Windows / cross-platform port
 
 ## Windows / Cross-Platform
 
@@ -308,5 +324,5 @@ For issues or questions, please open a GitHub issue. Check the troubleshooting s
 
 ---
 
-**Version**: 2.5
+**Version**: 3.2
 **Compatible With**: macOS 13.0+, Final Draft 12+
