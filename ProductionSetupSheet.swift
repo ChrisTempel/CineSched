@@ -15,13 +15,11 @@ struct ProductionSetupSheet: View {
     @State private var castList:      [CastMember] = []
     @State private var crew:          [CrewMember] = []
 
-    // New cast entry
-    @State private var newActorName:     String = ""
-    @State private var newCharacterName: String = ""
-
-    // New crew entry
-    @State private var newCrewName: String = ""
-    @State private var newCrewRole: String = ""
+    @State private var newActorName:          String = ""
+    @State private var newCharacterName:      String = ""
+    @State private var newCrewName:           String = ""
+    @State private var newCrewRole:           String = ""
+    @State private var newCrewIsDailyDefault: Bool   = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -35,9 +33,7 @@ struct ProductionSetupSheet: View {
                         .font(.subheadline).foregroundColor(.secondary)
                 }
                 Spacer()
-                Button {
-                    isPresented = false
-                } label: {
+                Button { isPresented = false } label: {
                     Image(systemName: "xmark.circle.fill")
                         .font(.title2).foregroundColor(.secondary)
                 }
@@ -53,24 +49,21 @@ struct ProductionSetupSheet: View {
 
                     // Production details
                     Group {
-                        Label("Production Details", systemImage: "building.2")
-                            .font(.headline)
-                        LabeledField("Production Company", placeholder: "e.g. Tempel Films",   text: $companyName)
-                        LabeledField("Director",           placeholder: "e.g. Chris Tempel",   text: $directorName)
-                        LabeledField("Contact Number",     placeholder: "e.g. 555-867-5309",   text: $contactNumber)
+                        Label("Production Details", systemImage: "building.2").font(.headline)
+                        LabeledField("Production Company", placeholder: "e.g. Tempel Films", text: $companyName)
+                        LabeledField("Director",           placeholder: "e.g. Chris Tempel",  text: $directorName)
+                        LabeledField("Contact Number",     placeholder: "e.g. 555-867-5309",  text: $contactNumber)
                     }
 
                     Divider()
 
                     // Cast list
-                    Label("Cast", systemImage: "star")
-                        .font(.headline)
+                    Label("Cast", systemImage: "star").font(.headline)
                     Text("Enter each actor and the character they play. Scene strips use character names — the app will look up the actor automatically.")
                         .font(.caption).foregroundColor(.secondary)
 
                     if castList.isEmpty {
-                        Text("No cast added yet.")
-                            .font(.caption).foregroundColor(.secondary)
+                        Text("No cast added yet.").font(.caption).foregroundColor(.secondary)
                     } else {
                         ForEach(Array(castList.enumerated()), id: \.element.id) { index, member in
                             HStack {
@@ -83,11 +76,8 @@ struct ProductionSetupSheet: View {
                                     }
                                 }
                                 Spacer()
-                                Button {
-                                    castList.remove(at: index)
-                                } label: {
-                                    Image(systemName: "minus.circle")
-                                        .foregroundColor(.red)
+                                Button { castList.remove(at: index) } label: {
+                                    Image(systemName: "minus.circle").foregroundColor(.red)
                                 }
                                 .buttonStyle(.plain)
                             }
@@ -97,23 +87,20 @@ struct ProductionSetupSheet: View {
                         }
                     }
 
-                    // Add cast member
                     HStack(spacing: 8) {
                         TextField("Actor name", text: $newActorName)
                             .textFieldStyle(RoundedBorderTextFieldStyle())
                         TextField("Character name", text: $newCharacterName)
                             .textFieldStyle(RoundedBorderTextFieldStyle())
                         Button {
-                            let actor = newActorName.trimmingCharacters(in: .whitespaces)
+                            let actor     = newActorName.trimmingCharacters(in: .whitespaces)
                             let character = newCharacterName.trimmingCharacters(in: .whitespaces)
                             guard !actor.isEmpty || !character.isEmpty else { return }
                             castList.append(CastMember(actorName: actor, characterName: character))
                             newActorName     = ""
                             newCharacterName = ""
                         } label: {
-                            Image(systemName: "plus.circle.fill")
-                                .foregroundColor(.blue)
-                                .font(.title3)
+                            Image(systemName: "plus.circle.fill").foregroundColor(.blue).font(.title3)
                         }
                         .buttonStyle(.plain)
                         .disabled(
@@ -125,12 +112,24 @@ struct ProductionSetupSheet: View {
                     Divider()
 
                     // Crew list
-                    Label("Crew", systemImage: "person.3")
-                        .font(.headline)
+                    Label("Crew", systemImage: "person.3").font(.headline)
+                    Text("Check \"Daily\" for crew expected on set every day — they'll be pre-populated on each call sheet. Specialty crew can be added per-day when building call sheets.")
+                        .font(.caption).foregroundColor(.secondary)
+
+                    // Column header
+                    HStack {
+                        Text("Name / Role")
+                            .font(.caption).foregroundColor(.secondary)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        Text("Daily")
+                            .font(.caption).foregroundColor(.secondary)
+                            .frame(width: 44, alignment: .center)
+                        Spacer().frame(width: 28)
+                    }
+                    .padding(.horizontal, 8)
 
                     if crew.isEmpty {
-                        Text("No crew added yet.")
-                            .font(.caption).foregroundColor(.secondary)
+                        Text("No crew added yet.").font(.caption).foregroundColor(.secondary)
                     } else {
                         ForEach(Array(crew.enumerated()), id: \.element.id) { index, member in
                             HStack {
@@ -142,17 +141,25 @@ struct ProductionSetupSheet: View {
                                             .font(.caption).foregroundColor(.secondary)
                                     }
                                 }
-                                Spacer()
-                                Button {
-                                    crew.remove(at: index)
-                                } label: {
-                                    Image(systemName: "minus.circle")
-                                        .foregroundColor(.red)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+
+                                Toggle("", isOn: Binding(
+                                    get: { crew[index].isDailyDefault },
+                                    set: { crew[index].isDailyDefault = $0 }
+                                ))
+                                .toggleStyle(.checkbox)
+                                .frame(width: 44, alignment: .center)
+
+                                Button { crew.remove(at: index) } label: {
+                                    Image(systemName: "minus.circle").foregroundColor(.red)
                                 }
                                 .buttonStyle(.plain)
+                                .frame(width: 28)
                             }
                             .padding(8)
-                            .background(Color.gray.opacity(0.08))
+                            .background(member.isDailyDefault
+                                ? Color.blue.opacity(0.07)
+                                : Color.gray.opacity(0.08))
                             .cornerRadius(6)
                         }
                     }
@@ -163,17 +170,23 @@ struct ProductionSetupSheet: View {
                             .textFieldStyle(RoundedBorderTextFieldStyle())
                         TextField("Role (e.g. DP)", text: $newCrewRole)
                             .textFieldStyle(RoundedBorderTextFieldStyle())
-                            .frame(maxWidth: 160)
+                            .frame(maxWidth: 140)
+                        Toggle("Daily", isOn: $newCrewIsDailyDefault)
+                            .toggleStyle(.checkbox)
+                            .help("Pre-populate on every call sheet")
                         Button {
                             let name = newCrewName.trimmingCharacters(in: .whitespaces)
                             guard !name.isEmpty else { return }
-                            crew.append(CrewMember(name: name, role: newCrewRole.trimmingCharacters(in: .whitespaces)))
-                            newCrewName = ""
-                            newCrewRole = ""
+                            crew.append(CrewMember(
+                                name:           name,
+                                role:           newCrewRole.trimmingCharacters(in: .whitespaces),
+                                isDailyDefault: newCrewIsDailyDefault
+                            ))
+                            newCrewName           = ""
+                            newCrewRole           = ""
+                            newCrewIsDailyDefault = false
                         } label: {
-                            Image(systemName: "plus.circle.fill")
-                                .foregroundColor(.blue)
-                                .font(.title3)
+                            Image(systemName: "plus.circle.fill").foregroundColor(.blue).font(.title3)
                         }
                         .buttonStyle(.plain)
                         .disabled(newCrewName.trimmingCharacters(in: .whitespaces).isEmpty)
@@ -184,10 +197,8 @@ struct ProductionSetupSheet: View {
 
             Divider()
 
-            // Footer
             HStack {
-                Button("Cancel") { isPresented = false }
-                    .buttonStyle(.bordered)
+                Button("Cancel") { isPresented = false }.buttonStyle(.bordered)
                 Spacer()
                 Button("Save") {
                     productionInfo.companyName   = companyName
@@ -202,7 +213,7 @@ struct ProductionSetupSheet: View {
             }
             .padding(24)
         }
-        .frame(width: 560, height: 680)
+        .frame(width: 580, height: 700)
         .onAppear {
             companyName   = productionInfo.companyName
             directorName  = productionInfo.directorName
@@ -212,8 +223,6 @@ struct ProductionSetupSheet: View {
         }
     }
 }
-
-// MARK: - Small helper view for labeled text fields
 
 private struct LabeledField: View {
     let label: String
@@ -229,8 +238,7 @@ private struct LabeledField: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             Text(label).font(.subheadline).foregroundColor(.secondary)
-            TextField(placeholder, text: $text)
-                .textFieldStyle(RoundedBorderTextFieldStyle())
+            TextField(placeholder, text: $text).textFieldStyle(RoundedBorderTextFieldStyle())
         }
     }
 }

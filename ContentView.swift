@@ -58,6 +58,10 @@ struct ContentView: View {
     // Production Setup sheet
     @State private var showingProductionSetup = false
 
+    // Boneyard sort
+    enum BoneyardSort { case defaultOrder, location, intExt, cast, dayNight }
+    @State private var boneyardSort: BoneyardSort = .defaultOrder
+
     // MARK: - Computed statistics
 
     private var scheduledDays: [ShootDay] { shootDays.filter { !$0.scenes.isEmpty } }
@@ -156,7 +160,27 @@ struct ContentView: View {
 
             Divider().padding(.vertical)
 
-            Text("Boneyard").font(.headline)
+            // Boneyard header with sort menu
+            HStack {
+                Text("Boneyard").font(.headline)
+                Spacer()
+                Menu {
+                    Button("Default Order") { boneyardSort = .defaultOrder }
+                    Button("Location")      { boneyardSort = .location }
+                    Button("INT / EXT")     { boneyardSort = .intExt }
+                    Button("Cast")          { boneyardSort = .cast }
+                    Button("Day / Night")   { boneyardSort = .dayNight }
+                } label: {
+                    HStack(spacing: 3) {
+                        Text(boneyardSortLabel)
+                            .font(.caption).foregroundColor(.secondary)
+                        Image(systemName: "chevron.down")
+                            .font(.caption2).foregroundColor(.secondary)
+                    }
+                }
+                .menuStyle(.borderlessButton)
+                .fixedSize()
+            }
 
             boneyardList
 
@@ -166,52 +190,122 @@ struct ContentView: View {
         .frame(minWidth: 300)
     }
 
+    // MARK: - Boneyard sort helpers
+
+    /// Strips a leading scene number ("7. ", "12A. ") from a title for sorting purposes.
+    private func stripSceneNumber(_ title: String) -> String {
+        let pattern = #"^\d+[A-Za-z]?\.\s*"#
+        if let range = title.range(of: pattern, options: .regularExpression) {
+            return String(title[range.upperBound...])
+        }
+        return title
+    }
+
+    /// Strips INT./EXT. prefix and scene number, returning just the location name.
+    private func locationSortKey(_ title: String) -> String {
+        let withoutNumber = stripSceneNumber(title)
+        let pattern = #"^(INT\.|EXT\.)\s*"#
+        if let range = withoutNumber.range(of: pattern, options: [.regularExpression, .caseInsensitive]) {
+            return String(withoutNumber[range.upperBound...])
+        }
+        return withoutNumber
+    }
+
+    /// Returns the INT/EXT prefix for sorting, or "ZZZ" to sort unknowns last.
+    private func intExtSortKey(_ title: String) -> String {
+        let withoutNumber = stripSceneNumber(title)
+        if withoutNumber.uppercased().hasPrefix("INT.") { return "INT." }
+        if withoutNumber.uppercased().hasPrefix("EXT.") { return "EXT." }
+        return "ZZZ"
+    }
+
+    private var boneyardSortLabel: String {
+        switch boneyardSort {
+        case .defaultOrder: return "Default"
+        case .location:     return "Location"
+        case .intExt:       return "INT/EXT"
+        case .cast:         return "Cast"
+        case .dayNight:     return "Day/Night"
+        }
+    }
+
+    private var sortedScenes: [(index: Int, scene: Scene)] {
+        let indexed = allScenes.enumerated().map { (index: $0.offset, scene: $0.element) }
+        switch boneyardSort {
+        case .defaultOrder:
+            return indexed
+        case .location:
+            return indexed.sorted { locationSortKey($0.scene.title) < locationSortKey($1.scene.title) }
+        case .intExt:
+            return indexed.sorted {
+                let a = intExtSortKey($0.scene.title)
+                let b = intExtSortKey($1.scene.title)
+                if a != b { return a < b }
+                return locationSortKey($0.scene.title) < locationSortKey($1.scene.title)
+            }
+        case .cast:
+            return indexed.sorted {
+                let a = $0.scene.cast.sorted().first ?? "ZZZ"
+                let b = $1.scene.cast.sorted().first ?? "ZZZ"
+                return a < b
+            }
+        case .dayNight:
+            return indexed.sorted {
+                if $0.scene.dayNightType != $1.scene.dayNightType {
+                    return $0.scene.dayNightType == .day
+                }
+                return locationSortKey($0.scene.title) < locationSortKey($1.scene.title)
+            }
+        }
+    }
+
     // MARK: - Boneyard list
 
     private var boneyardList: some View {
         List {
-            ForEach(Array(allScenes.enumerated()), id: \.element.id) { index, scene in
+            ForEach(sortedScenes, id: \.scene.id) { item in
                 HStack {
-                    Circle().fill(scene.dayNightType.color).frame(width: 8, height: 8)
-                    Text(scene.title)
+                    Circle().fill(item.scene.dayNightType.color).frame(width: 8, height: 8)
+                    Text(item.scene.title)
                     Spacer()
-                    Text(scene.dayNightType.displayName)
-                        .font(.caption).foregroundColor(scene.dayNightType.color).fontWeight(.semibold)
-                    Text("\(FractionParser.formatEighths(scene.duration)) / \(formattedTime(scene.estimatedTime))")
+                    Text(item.scene.dayNightType == .day ? "D" : "N")
+                        .font(.caption).foregroundColor(item.scene.dayNightType.color).fontWeight(.semibold)
+                    Text("\(FractionParser.formatEighths(item.scene.duration)) / \(formattedTime(item.scene.estimatedTime))")
                     Button {
-                        allScenes.remove(at: index)
+                        allScenes.remove(at: item.index)
                         markDirty()
                     } label: {
                         Image(systemName: "trash").foregroundColor(.red).help("Delete Scene")
                     }
                     .buttonStyle(.plain)
                 }
-                .onDrag { NSItemProvider(object: scene.id.uuidString as NSString) }
+                .onDrag { NSItemProvider(object: item.scene.id.uuidString as NSString) }
+                .help(item.scene.title)
                 .onTapGesture(count: 2) {
-                    editingUnscheduledSceneIndex = index
-                    editingUnscheduledScene      = scene
+                    editingUnscheduledSceneIndex = item.index
+                    editingUnscheduledScene      = item.scene
                     showingUnscheduledSceneEditSheet = true
                 }
                 .contextMenu {
                     Button("Edit Scene") {
-                        editingUnscheduledSceneIndex = index
-                        editingUnscheduledScene      = scene
+                        editingUnscheduledSceneIndex = item.index
+                        editingUnscheduledScene      = item.scene
                         showingUnscheduledSceneEditSheet = true
                     }
                     Button("Duplicate Scene") {
                         allScenes.append(Scene(
-                            title: scene.title + " (Copy)",
-                            duration: scene.duration,
-                            estimatedTime: scene.estimatedTime,
-                            dayNightType: scene.dayNightType,
-                            cast: scene.cast,
-                            summary: scene.summary
+                            title:         item.scene.title + " (Copy)",
+                            duration:      item.scene.duration,
+                            estimatedTime: item.scene.estimatedTime,
+                            dayNightType:  item.scene.dayNightType,
+                            cast:          item.scene.cast,
+                            summary:       item.scene.summary
                         ))
                         markDirty()
                     }
                     Divider()
                     Button("Delete Scene", role: .destructive) {
-                        allScenes.remove(at: index)
+                        allScenes.remove(at: item.index)
                         markDirty()
                     }
                 }

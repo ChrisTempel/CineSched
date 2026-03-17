@@ -9,28 +9,23 @@ import UniformTypeIdentifiers
 
 class CallSheetExporter {
 
-    // MARK: - Page constants
-    private static let pageWidth:  CGFloat = 612   // US Letter portrait
+    private static let pageWidth:  CGFloat = 612
     private static let pageHeight: CGFloat = 792
     private static let margin:     CGFloat = 50
-    private static let colWidth:   CGFloat = 612 - 100  // content width
+    private static let colWidth:   CGFloat = 512
 
-    // MARK: - Fonts
-    private static let fontTitle     = NSFont.boldSystemFont(ofSize: 16)
-    private static let fontHeading   = NSFont.boldSystemFont(ofSize: 11)
-    private static let fontSubhead   = NSFont.boldSystemFont(ofSize: 9)
-    private static let fontBody      = NSFont.systemFont(ofSize: 9)
-    private static let fontSmall     = NSFont.systemFont(ofSize: 8)
-    private static let fontCaption   = NSFont.systemFont(ofSize: 7.5)
+    private static let fontTitle   = NSFont.boldSystemFont(ofSize: 16)
+    private static let fontHeading = NSFont.boldSystemFont(ofSize: 11)
+    private static let fontSubhead = NSFont.boldSystemFont(ofSize: 9)
+    private static let fontBody    = NSFont.systemFont(ofSize: 9)
+    private static let fontSmall   = NSFont.systemFont(ofSize: 8)
+    private static let fontCaption = NSFont.systemFont(ofSize: 7.5)
 
-    // MARK: - Colors
-    private static let colorBlack    = NSColor.black
-    private static let colorDark     = NSColor(white: 0.15, alpha: 1)
-    private static let colorMid      = NSColor(white: 0.45, alpha: 1)
-    private static let colorLight    = NSColor(white: 0.92, alpha: 1)
-    private static let colorDivider  = NSColor(white: 0.75, alpha: 1)
-
-    // MARK: - Generate
+    private static let colorBlack   = NSColor.black
+    private static let colorDark    = NSColor(white: 0.15, alpha: 1)
+    private static let colorMid     = NSColor(white: 0.45, alpha: 1)
+    private static let colorLight   = NSColor(white: 0.92, alpha: 1)
+    private static let colorDivider = NSColor(white: 0.75, alpha: 1)
 
     static func generatePDF(
         shootDay: ShootDay,
@@ -47,13 +42,16 @@ class CallSheetExporter {
         NSGraphicsContext.saveGraphicsState()
         NSGraphicsContext.current = gctx
 
+        // Resolve crew for this day before drawing
+        let resolvedCrew = shootDay.callSheet.resolvedCrew(productionInfo: productionInfo)
+
         var y = pageHeight - margin
         y = drawPageHeader(y: y, shootDay: shootDay, productionInfo: productionInfo, projectTitle: projectTitle)
-        y = drawSection(y: y, title: "LOCATIONS",       content: { yy in drawLocations(y: yy,  shootDay: shootDay) })
-        y = drawSection(y: y, title: "SCENE BREAKDOWN", content: { yy in drawScenes(y: yy,     shootDay: shootDay) })
-        y = drawSection(y: y, title: "CAST",            content: { yy in drawCast(y: yy,       shootDay: shootDay, productionInfo: productionInfo) })
-        y = drawSection(y: y, title: "CREW",            content: { yy in drawCrew(y: yy,       productionInfo: productionInfo) })
-           _ = drawSection(y: y, title: "NOTES",           content: { yy in drawNotes(y: yy,      shootDay: shootDay) })
+        y = drawSection(y: y, title: "LOCATIONS",       content: { yy in drawLocations(y: yy, shootDay: shootDay) })
+        y = drawSection(y: y, title: "SCENE BREAKDOWN", content: { yy in drawScenes(y: yy,    shootDay: shootDay) })
+        y = drawSection(y: y, title: "CAST",            content: { yy in drawCast(y: yy,      shootDay: shootDay, productionInfo: productionInfo) })
+        y = drawSection(y: y, title: "CREW",            content: { yy in drawCrew(y: yy,      crew: resolvedCrew) })
+          _ = drawSection(y: y, title: "NOTES",         content: { yy in drawNotes(y: yy,     shootDay: shootDay) })
 
         NSGraphicsContext.restoreGraphicsState()
         ctx.endPDFPage()
@@ -70,26 +68,16 @@ class CallSheetExporter {
         projectTitle: String
     ) -> CGFloat {
         var y = y
-
-        // Company name
         if !productionInfo.companyName.isEmpty {
             y = drawText(productionInfo.companyName.uppercased(),
                          font: fontHeading, color: colorMid, x: margin, y: y, width: colWidth)
             y -= 4
         }
-
-        // Movie title (large)
         y = drawText(projectTitle.isEmpty ? "Untitled Movie" : projectTitle,
                      font: fontTitle, color: colorBlack, x: margin, y: y, width: colWidth * 0.65)
-
-        // Date (right-aligned on same baseline as title)
         let dateStr = "Call Sheet — \(fullFormattedDate(shootDay.date))"
-        drawTextRight(dateStr, font: fontBody, color: colorMid,
-                      x: margin, y: y + 16, width: colWidth)
-
+        drawTextRight(dateStr, font: fontBody, color: colorMid, x: margin, y: y + 16, width: colWidth)
         y -= 6
-
-        // Director / Contact — info row (without call time)
         var infoLine = ""
         if !productionInfo.directorName.isEmpty  { infoLine += "Director: \(productionInfo.directorName)     " }
         if !productionInfo.contactNumber.isEmpty { infoLine += "Contact: \(productionInfo.contactNumber)" }
@@ -98,33 +86,18 @@ class CallSheetExporter {
                          font: fontBody, color: colorDark, x: margin, y: y, width: colWidth)
             y -= 4
         }
-
-        // General Call Time — prominent, bold, right-aligned
         if !shootDay.callSheet.generalCallTime.isEmpty {
+            let para = NSMutableParagraphStyle(); para.alignment = .right
             let callAttr: [NSAttributedString.Key: Any] = [
-                .font: NSFont.boldSystemFont(ofSize: 14),
-                .foregroundColor: colorBlack
-            ]
-            let callLabel = NSAttributedString(
-                string: "GENERAL CALL:  \(shootDay.callSheet.generalCallTime)",
-                attributes: callAttr
-            )
-            let h = callLabel.size().height
-            let para = NSMutableParagraphStyle()
-            para.alignment = .right
-            let callAttrRight: [NSAttributedString.Key: Any] = [
                 .font: NSFont.boldSystemFont(ofSize: 14),
                 .foregroundColor: colorBlack,
                 .paragraphStyle: para
             ]
-            NSAttributedString(
-                string: "GENERAL CALL:  \(shootDay.callSheet.generalCallTime)",
-                attributes: callAttrRight
-            ).draw(in: CGRect(x: margin, y: y - h, width: colWidth, height: h))
+            let str = NSAttributedString(string: "GENERAL CALL:  \(shootDay.callSheet.generalCallTime)", attributes: callAttr)
+            let h   = str.size().height
+            str.draw(in: CGRect(x: margin, y: y - h, width: colWidth, height: h))
             y -= h + 4
         }
-
-        // Heavy rule under header
         y -= 6
         drawHRule(y: y, thick: true)
         y -= 12
@@ -133,28 +106,17 @@ class CallSheetExporter {
 
     // MARK: - Section wrapper
 
-    private static func drawSection(
-        y: CGFloat,
-        title: String,
-        content: (CGFloat) -> CGFloat
-    ) -> CGFloat {
+    private static func drawSection(y: CGFloat, title: String, content: (CGFloat) -> CGFloat) -> CGFloat {
         var y = y
-        guard y > margin + 40 else { return y }   // no room — skip gracefully
-
-        // Section title bar
+        guard y > margin + 40 else { return y }
         let barRect = CGRect(x: margin, y: y - 16, width: colWidth, height: 16)
         colorLight.setFill()
         NSBezierPath(rect: barRect).fill()
-
-        let titleAttr: [NSAttributedString.Key: Any] = [
-            .font: fontSubhead,
-            .foregroundColor: colorDark
-        ]
+        let titleAttr: [NSAttributedString.Key: Any] = [.font: fontSubhead, .foregroundColor: colorDark]
         NSAttributedString(string: title, attributes: titleAttr)
             .draw(in: CGRect(x: margin + 6, y: y - 14, width: colWidth - 12, height: 14))
-
         y -= 20
-        y = content(y)
+        y  = content(y)
         y -= 10
         drawHRule(y: y, thick: false)
         y -= 10
@@ -171,9 +133,8 @@ class CallSheetExporter {
                             x: margin + 6, y: y, width: colWidth - 12)
         }
         for (i, loc) in locs.enumerated() {
-            let nameStr = "\(i + 1).  \(loc.name.isEmpty ? "Unnamed Location" : loc.name)"
-            y = drawText(nameStr, font: fontHeading, color: colorDark,
-                         x: margin + 6, y: y, width: colWidth - 12)
+            y = drawText("\(i + 1).  \(loc.name.isEmpty ? "Unnamed Location" : loc.name)",
+                         font: fontHeading, color: colorDark, x: margin + 6, y: y, width: colWidth - 12)
             if !loc.address.isEmpty {
                 y = drawText("      \(loc.address)", font: fontBody, color: colorMid,
                              x: margin + 6, y: y - 2, width: colWidth - 12)
@@ -190,40 +151,28 @@ class CallSheetExporter {
             return drawText("No scenes scheduled.", font: fontBody, color: colorMid,
                             x: margin + 6, y: y, width: colWidth - 12)
         }
-
-        // Column headers
-        let col1: CGFloat = margin + 6
-        let col2: CGFloat = col1 + 36
-        let col3: CGFloat = col2 + 260
-        let col4: CGFloat = col3 + 50
-        let colW1: CGFloat = 30
-        let colW2: CGFloat = 255
-        let colW3: CGFloat = 45
-        let colW4: CGFloat = 60
-
+        let col1: CGFloat = margin + 6;  let colW1: CGFloat = 30
+        let col2: CGFloat = col1 + 36;   let colW2: CGFloat = 255
+        let col3: CGFloat = col2 + 260;  let colW3: CGFloat = 45
+        let col4: CGFloat = col3 + 50;   let colW4: CGFloat = 60
         let headerAttr: [NSAttributedString.Key: Any] = [.font: fontSubhead, .foregroundColor: colorMid]
         NSAttributedString(string: "#",        attributes: headerAttr).draw(in: CGRect(x: col1, y: y - 12, width: colW1, height: 12))
         NSAttributedString(string: "LOCATION", attributes: headerAttr).draw(in: CGRect(x: col2, y: y - 12, width: colW2, height: 12))
         NSAttributedString(string: "D/N",      attributes: headerAttr).draw(in: CGRect(x: col3, y: y - 12, width: colW3, height: 12))
         NSAttributedString(string: "PAGES",    attributes: headerAttr).draw(in: CGRect(x: col4, y: y - 12, width: colW4, height: 12))
         y -= 16
-
-        let para = NSMutableParagraphStyle()
-        para.lineBreakMode = .byTruncatingTail
+        let para = NSMutableParagraphStyle(); para.lineBreakMode = .byTruncatingTail
         let rowAttr: [NSAttributedString.Key: Any] = [.font: fontBody, .foregroundColor: colorDark, .paragraphStyle: para]
-
         for (i, scene) in shootDay.scenes.enumerated() {
-            // Zebra stripe
             if i % 2 == 0 {
-                let stripe = CGRect(x: margin, y: y - 12, width: colWidth, height: 13)
                 NSColor(white: 0.97, alpha: 1).setFill()
-                NSBezierPath(rect: stripe).fill()
+                NSBezierPath(rect: CGRect(x: margin, y: y - 12, width: colWidth, height: 13)).fill()
             }
             let sceneNum = extractSceneNumber(from: scene.title)
             let location = extractLocation(from: scene.title)
-            NSAttributedString(string: sceneNum,                        attributes: rowAttr).draw(in: CGRect(x: col1, y: y - 11, width: colW1, height: 11))
-            NSAttributedString(string: location,                        attributes: rowAttr).draw(in: CGRect(x: col2, y: y - 11, width: colW2, height: 11))
-            NSAttributedString(string: scene.dayNightType.displayName,  attributes: rowAttr).draw(in: CGRect(x: col3, y: y - 11, width: colW3, height: 11))
+            NSAttributedString(string: sceneNum,                         attributes: rowAttr).draw(in: CGRect(x: col1, y: y - 11, width: colW1, height: 11))
+            NSAttributedString(string: location,                         attributes: rowAttr).draw(in: CGRect(x: col2, y: y - 11, width: colW2, height: 11))
+            NSAttributedString(string: scene.dayNightType.displayName,   attributes: rowAttr).draw(in: CGRect(x: col3, y: y - 11, width: colW3, height: 11))
             NSAttributedString(string: formattedEighths(scene.duration), attributes: rowAttr).draw(in: CGRect(x: col4, y: y - 11, width: colW4, height: 11))
             y -= 14
         }
@@ -239,41 +188,43 @@ class CallSheetExporter {
         }
         for (i, member) in cast.enumerated() {
             if i % 2 == 0 {
-                let stripe = CGRect(x: margin, y: y - 12, width: colWidth, height: 13)
                 NSColor(white: 0.97, alpha: 1).setFill()
-                NSBezierPath(rect: stripe).fill()
+                NSBezierPath(rect: CGRect(x: margin, y: y - 12, width: colWidth, height: 13)).fill()
             }
-            drawTextInline(member, font: fontBody, color: colorDark,
-                           x: margin + 6, y: y - 11, width: colWidth - 12)
+            drawTextInline(member, font: fontBody, color: colorDark, x: margin + 6, y: y - 11, width: colWidth - 12)
             y -= 14
         }
         return y
     }
 
-    private static func drawCrew(y: CGFloat, productionInfo: ProductionInfo) -> CGFloat {
+    /// Draws crew from the already-resolved list passed in from generatePDF.
+    private static func drawCrew(y: CGFloat, crew: [String]) -> CGFloat {
         var y = y
-        if productionInfo.crew.isEmpty {
+        if crew.isEmpty {
             return drawText("No crew listed.", font: fontBody, color: colorMid,
                             x: margin + 6, y: y, width: colWidth - 12)
         }
         let nameWidth: CGFloat = 200
         let roleWidth: CGFloat = colWidth - 12 - nameWidth
-        for (i, member) in productionInfo.crew.enumerated() {
+        for (i, entry) in crew.enumerated() {
             if i % 2 == 0 {
-                let stripe = CGRect(x: margin, y: y - 12, width: colWidth, height: 13)
                 NSColor(white: 0.97, alpha: 1).setFill()
-                NSBezierPath(rect: stripe).fill()
+                NSBezierPath(rect: CGRect(x: margin, y: y - 12, width: colWidth, height: 13)).fill()
             }
-            drawTextInline(member.name, font: fontBody,    color: colorDark, x: margin + 6,             y: y - 11, width: nameWidth)
-            drawTextInline(member.role, font: fontCaption, color: colorMid,  x: margin + 6 + nameWidth, y: y - 11, width: roleWidth)
+            // Split "Name — Role" if present
+            let parts = entry.components(separatedBy: " — ")
+            let name  = parts.first ?? entry
+            let role  = parts.count > 1 ? parts.dropFirst().joined(separator: " — ") : ""
+            drawTextInline(name, font: fontBody,    color: colorDark, x: margin + 6,             y: y - 11, width: nameWidth)
+            drawTextInline(role, font: fontCaption, color: colorMid,  x: margin + 6 + nameWidth, y: y - 11, width: roleWidth)
             y -= 14
         }
         return y
     }
 
     private static func drawNotes(y: CGFloat, shootDay: ShootDay) -> CGFloat {
-        let notes = shootDay.callSheet.notes.trimmingCharacters(in: .whitespacesAndNewlines)
-        let startY = y - 6   // drop below the section header bar
+        let notes  = shootDay.callSheet.notes.trimmingCharacters(in: .whitespacesAndNewlines)
+        let startY = y - 6
         if notes.isEmpty {
             return drawText("No notes.", font: fontBody, color: colorMid,
                             x: margin + 6, y: startY, width: colWidth - 12)
@@ -285,10 +236,8 @@ class CallSheetExporter {
     // MARK: - Low-level drawing helpers
 
     @discardableResult
-    private static func drawText(
-        _ text: String, font: NSFont, color: NSColor,
-        x: CGFloat, y: CGFloat, width: CGFloat
-    ) -> CGFloat {
+    private static func drawText(_ text: String, font: NSFont, color: NSColor,
+                                  x: CGFloat, y: CGFloat, width: CGFloat) -> CGFloat {
         let attr: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: color]
         let str  = NSAttributedString(string: text, attributes: attr)
         let h    = str.size().height
@@ -296,63 +245,42 @@ class CallSheetExporter {
         return y - h
     }
 
-    private static func drawTextInline(
-        _ text: String, font: NSFont, color: NSColor,
-        x: CGFloat, y: CGFloat, width: CGFloat
-    ) {
-        let para = NSMutableParagraphStyle()
-        para.lineBreakMode = .byTruncatingTail
+    private static func drawTextInline(_ text: String, font: NSFont, color: NSColor,
+                                        x: CGFloat, y: CGFloat, width: CGFloat) {
+        let para = NSMutableParagraphStyle(); para.lineBreakMode = .byTruncatingTail
         let attr: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: color, .paragraphStyle: para]
         NSAttributedString(string: text, attributes: attr).draw(in: CGRect(x: x, y: y, width: width, height: 11))
     }
 
-    private static func drawTextRight(
-        _ text: String, font: NSFont, color: NSColor,
-        x: CGFloat, y: CGFloat, width: CGFloat
-    ) {
-        let para = NSMutableParagraphStyle()
-        para.alignment = .right
+    private static func drawTextRight(_ text: String, font: NSFont, color: NSColor,
+                                       x: CGFloat, y: CGFloat, width: CGFloat) {
+        let para = NSMutableParagraphStyle(); para.alignment = .right
         let attr: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: color, .paragraphStyle: para]
         let h = NSAttributedString(string: text, attributes: attr).size().height
         NSAttributedString(string: text, attributes: attr).draw(in: CGRect(x: x, y: y - h, width: width, height: h))
     }
 
     @discardableResult
-    private static func drawTextMultiline(
-        _ text: String, font: NSFont, color: NSColor,
-        x: CGFloat, y: CGFloat, width: CGFloat
-    ) -> CGFloat {
-        let para = NSMutableParagraphStyle()
-        para.lineSpacing    = 2
-        para.lineBreakMode  = .byWordWrapping
-        let attr: [NSAttributedString.Key: Any] = [
-            .font: font,
-            .foregroundColor: color,
-            .paragraphStyle: para
-        ]
-        let attrStr    = NSAttributedString(string: text, attributes: attr)
-        let maxHeight:  CGFloat = 400
-        let boundingSize = attrStr.boundingRect(
-            with: CGSize(width: width, height: maxHeight),
-            options: [.usesLineFragmentOrigin, .usesFontLeading]
-        ).size
-        let h = ceil(boundingSize.height)
+    private static func drawTextMultiline(_ text: String, font: NSFont, color: NSColor,
+                                           x: CGFloat, y: CGFloat, width: CGFloat) -> CGFloat {
+        let para = NSMutableParagraphStyle(); para.lineSpacing = 2; para.lineBreakMode = .byWordWrapping
+        let attr: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: color, .paragraphStyle: para]
+        let attrStr = NSAttributedString(string: text, attributes: attr)
+        let h = ceil(attrStr.boundingRect(with: CGSize(width: width, height: 400),
+                                          options: [.usesLineFragmentOrigin, .usesFontLeading]).size.height)
         attrStr.draw(in: CGRect(x: x, y: y - h, width: width, height: h))
         return y - h - 4
     }
 
     private static func drawHRule(y: CGFloat, thick: Bool) {
-        let path = NSBezierPath()
-        path.lineWidth = thick ? 1.0 : 0.4
+        let path = NSBezierPath(); path.lineWidth = thick ? 1.0 : 0.4
         (thick ? colorDark : colorDivider).setStroke()
-        path.move(to: CGPoint(x: margin, y: y))
-        path.line(to: CGPoint(x: margin + colWidth, y: y))
+        path.move(to: CGPoint(x: margin, y: y)); path.line(to: CGPoint(x: margin + colWidth, y: y))
         path.stroke()
     }
 
-    // MARK: - Scene title parsing helpers
+    // MARK: - Scene title helpers
 
-    /// Pulls the scene number from a title like "3. EXT. WOODS" → "3"
     private static func extractSceneNumber(from title: String) -> String {
         let pattern = #"^(\d+[A-Z]?)\."#
         if let regex = try? NSRegularExpression(pattern: pattern),
@@ -363,34 +291,25 @@ class CallSheetExporter {
         return "—"
     }
 
-    /// Strips the scene number prefix, leaving "EXT. WOODS" from "3. EXT. WOODS"
     private static func extractLocation(from title: String) -> String {
         let pattern = #"^\d+[A-Z]?\.\s*"#
         if let regex = try? NSRegularExpression(pattern: pattern) {
-            let result = regex.stringByReplacingMatches(
-                in: title,
-                range: NSRange(title.startIndex..., in: title),
-                withTemplate: ""
-            )
-            return result.trimmingCharacters(in: .whitespaces)
+            return regex.stringByReplacingMatches(in: title, range: NSRange(title.startIndex..., in: title), withTemplate: "")
+                .trimmingCharacters(in: .whitespaces)
         }
         return title
     }
 
-    // MARK: - Date formatting
-
     private static func fullFormattedDate(_ date: Date) -> String {
-        let f = DateFormatter()
-        f.dateFormat = "EEEE, MMMM d, yyyy"
-        return f.string(from: date)
+        let f = DateFormatter(); f.dateFormat = "EEEE, MMMM d, yyyy"; return f.string(from: date)
     }
 }
 
-// MARK: - CallSheetFile (FileDocument wrapper)
+// MARK: - CallSheetFile
 
 struct CallSheetFile: FileDocument {
     static var readableContentTypes:  [UTType] = [.pdf]
-    static var writableContentTypes: [UTType] = [.pdf]
+    static var writableContentTypes: [UTType]  = [.pdf]
 
     private let shootDay:       ShootDay
     private let productionInfo: ProductionInfo
@@ -402,15 +321,11 @@ struct CallSheetFile: FileDocument {
         self.projectTitle   = projectTitle
     }
 
-    init(configuration: ReadConfiguration) throws {
-        throw CocoaError(.fileReadUnsupportedScheme)
-    }
+    init(configuration: ReadConfiguration) throws { throw CocoaError(.fileReadUnsupportedScheme) }
 
     func fileWrapper(configuration: WriteConfiguration) throws -> FileWrapper {
         guard let data = CallSheetExporter.generatePDF(
-            shootDay: shootDay,
-            productionInfo: productionInfo,
-            projectTitle: projectTitle
+            shootDay: shootDay, productionInfo: productionInfo, projectTitle: projectTitle
         ) else { throw CocoaError(.fileWriteUnknown) }
         return FileWrapper(regularFileWithContents: data)
     }

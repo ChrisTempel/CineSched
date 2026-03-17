@@ -46,6 +46,9 @@ struct SceneEditSheet: View {
                     } else if let eighths = FractionParser.parseToEighths(editDuration), !editDuration.isEmpty {
                         Text("= \(FractionParser.formatEighths(eighths)) pages (\(eighths) eighths)")
                             .font(.caption).foregroundColor(.secondary)
+                    } else if editDayNightType == .custom {
+                        Text("Leave blank for no page count")
+                            .font(.caption).foregroundColor(.secondary)
                     }
                 }
 
@@ -62,6 +65,9 @@ struct SceneEditSheet: View {
                             .font(.caption).foregroundColor(.red)
                     } else if let hint = TimeParser.getInputHint(editEstimatedTime), !editEstimatedTime.isEmpty {
                         Text(hint).font(.caption).foregroundColor(.secondary)
+                    } else if editDayNightType == .custom {
+                        Text("Leave blank for no time estimate")
+                            .font(.caption).foregroundColor(.secondary)
                     }
                 }
 
@@ -84,9 +90,9 @@ struct SceneEditSheet: View {
                         .cornerRadius(4)
                 }
 
-                // Day / Night
+                // Day / Night / Custom
                 VStack(alignment: .leading, spacing: 8) {
-                    Text("Time of Day").font(.headline)
+                    Text("Type").font(.headline)
                     HStack(spacing: 20) {
                         ForEach(DayNightType.allCases, id: \.self) { type in
                             HStack(spacing: 8) {
@@ -96,7 +102,7 @@ struct SceneEditSheet: View {
                                     HStack(spacing: 6) {
                                         Image(systemName: editDayNightType == type ? "checkmark.circle.fill" : "circle")
                                             .foregroundColor(editDayNightType == type ? type.color : .secondary)
-                                        Text(type.displayName)
+                                        Text(type == .custom ? "Custom" : type.displayName)
                                             .foregroundColor(editDayNightType == type ? type.color : .primary)
                                             .fontWeight(editDayNightType == type ? .semibold : .regular)
                                     }
@@ -144,8 +150,8 @@ struct SceneEditSheet: View {
 
     private func populateFields() {
         editTitle         = scene.title
-        editDuration      = FractionParser.formatEighths(scene.duration)
-        editEstimatedTime = formatMinutesForEditing(scene.estimatedTime)
+        editDuration      = scene.duration > 0 ? FractionParser.formatEighths(scene.duration) : ""
+        editEstimatedTime = scene.estimatedTime > 0 ? formatMinutesForEditing(scene.estimatedTime) : ""
         editDayNightType  = scene.dayNightType
         editCastText      = scene.cast.joined(separator: ", ")
         editSummary       = scene.summary
@@ -171,7 +177,11 @@ struct SceneEditSheet: View {
     }
 
     private func isValidInput() -> Bool {
-        let titleOK    = !editTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        let titleOK = !editTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        if editDayNightType == .custom {
+            // Custom strips only require a title
+            return titleOK && durationIsValid && estimatedTimeIsValid
+        }
         let durationOK = (FractionParser.parseToEighths(editDuration) ?? 0) > 0
         let timeOK     = (TimeParser.parseToMinutes(editEstimatedTime) ?? 0) > 0
         return titleOK && durationOK && timeOK
@@ -185,7 +195,9 @@ struct SceneEditSheet: View {
             .map { $0.trimmingCharacters(in: .whitespaces) }
             .filter { !$0.isEmpty }
         scene.summary      = editSummary
-        if let d = FractionParser.parseToEighths(editDuration)  { scene.duration      = d }
-        if let t = TimeParser.parseToMinutes(editEstimatedTime)  { scene.estimatedTime = t }
+        if let d = FractionParser.parseToEighths(editDuration) { scene.duration      = d }
+        else if editDayNightType == .custom                     { scene.duration      = 0 }
+        if let t = TimeParser.parseToMinutes(editEstimatedTime) { scene.estimatedTime = t }
+        else if editDayNightType == .custom                     { scene.estimatedTime = 0 }
     }
 }
