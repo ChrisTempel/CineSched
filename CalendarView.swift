@@ -364,9 +364,13 @@ struct SceneCardView: View {
                     Text("(\(formattedEighths(scene.duration)), \(formattedTime(scene.estimatedTime)))")
                         .font(.caption2).foregroundColor(.secondary)
                     Spacer()
-                    Text(scene.dayNightType.displayName)
-                        .font(.caption2).fontWeight(.semibold)
-                        .foregroundColor(scene.dayNightType.color)
+                    
+                    // Only show DAY/NIGHT label — hide for Custom
+                    if scene.dayNightType != .custom {
+                        Text(scene.dayNightType.displayName)
+                            .font(.caption2).fontWeight(.semibold)
+                            .foregroundColor(scene.dayNightType.color)
+                    }
                 }
             }
         }
