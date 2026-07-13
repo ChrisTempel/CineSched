@@ -5,7 +5,7 @@ A macOS application for scheduling film shoots with visual calendar layouts, sce
 ![Platform](https://img.shields.io/badge/platform-macOS-blue)
 ![Swift](https://img.shields.io/badge/Swift-5.0-orange)
 ![SwiftUI](https://img.shields.io/badge/SwiftUI-4.0-green)
-![Version](https://img.shields.io/badge/version-3.2-purple)
+![Version](https://img.shields.io/badge/version-3.3-purple)
 ![License](https://img.shields.io/badge/license-GPL--v3-lightgrey)
 
 > **Free for the film community.** Built by a filmmaker, for filmmakers. If you find it useful, the best way to say thanks is to share it. If you're a developer who wants to build a Windows version, [read this](#windows--cross-platform).
@@ -26,7 +26,8 @@ A macOS application for scheduling film shoots with visual calendar layouts, sce
 ### 🎬 Scene Management
 - Create scenes with custom titles, durations, and time estimates
 - Day, Night, or Custom type for each scene — Custom strips require only a title, page count and time are optional
-- "Boneyard" sidebar for unscheduled scenes with sort options: Location, INT/EXT, Cast, Day/Night, or Default
+- "Boneyard" sidebar for unscheduled scenes with sort options: Location, INT/EXT, Cast, Day/Night, or Default — your chosen sort is remembered the next time you open the project
+- **Multi-select scenes in the Boneyard** — ⌘-click to add/remove individual scenes, ⇧-click to select a range in the current sort order, then drag the whole selection onto a calendar day at once (handy for grabbing everything at one location and scheduling it together)
 - Double-click to edit any scene
 - Flexible duration input (pages in eighths: "1 7/8", "15", etc.)
 - Flexible time input (hours or minutes: "4", "2:30", "15")
@@ -62,6 +63,10 @@ A macOS application for scheduling film shoots with visual calendar layouts, sce
 - Automatic project saving after any change
 - Manual save/load for sharing projects as `.json` files
 - "New" fully resets the project — clears all scenes, call sheets, title, and production info
+
+### 🧭 Sidebar Layout
+- "Select Date Range" and "New Scene" collapse independently, freeing up vertical space for the Boneyard — great when you're actively scheduling and want to see more unscheduled scenes at once
+- Collapsed/expanded state is remembered between launches
 
 ### 🎨 Customization
 - Dark/Light mode toggle
@@ -115,13 +120,20 @@ A macOS application for scheduling film shoots with visual calendar layouts, sce
    - Use the sort menu next to the Boneyard heading to group scenes by Location, INT/EXT, Cast, or Day/Night
    - Default order is always available to restore the original sequence
    - Sorting is display-only and does not affect scheduling
+   - Your chosen sort sticks around the next time you open the project
 
-6. **Schedule Scenes**
+6. **Collapse sidebar sections while scheduling** *(optional)*
+   - Click the disclosure arrow next to "Select Date Range" or "New Scene" to collapse it
+   - The Boneyard expands to fill the freed-up space — useful once your date range and scene list are already set and you're focused on dragging scenes onto days
+   - Collapsed sections stay collapsed the next time you open the app
+
+7. **Schedule Scenes**
    - Drag scenes from the Boneyard onto calendar days
    - Day scenes appear in white boxes, night in gray, custom in a red-outlined box
    - Daily totals appear at the bottom of each day
+   - To schedule several scenes at once, ⌘-click or ⇧-click to select multiple scenes in the Boneyard, then drag any one of the selected scenes — the whole group moves together onto the drop target
 
-7. **Edit Scenes**
+8. **Edit Scenes**
    - Double-click any scene (scheduled or in Boneyard) to edit
    - Update title, duration, time, or type
    - Delete scenes from the edit sheet if needed
@@ -242,6 +254,8 @@ Import scripts directly from Final Draft:
    - Import your script first, then set up Production Setup before building call sheets
    - Edit page counts in batches (double-click each scene in the Boneyard)
    - Use the Location sort in the Boneyard to cluster scenes by place before scheduling
+   - Select all scenes at one location (Location sort + ⇧-click the range) and drag them onto a day in one move
+   - Collapse "Select Date Range" and "New Scene" once you're set up, so the Boneyard has more room while you drag scenes onto the calendar
    - Use Custom strips for company moves so they stand out on the calendar and print clearly on B&W
 
 2. **Keyboard Shortcuts**
@@ -324,5 +338,5 @@ For issues or questions, please open a GitHub issue. Check the troubleshooting s
 
 ---
 
-**Version**: 3.2
+**Version**: 3.3
 **Compatible With**: macOS 13.0+, Final Draft 12+

@@ -46,8 +46,13 @@ struct CompactMonthCalendarView: View {
                 }
             }
             .padding(.horizontal, 16)
-            .padding(.bottom, 20)
+            .padding(.bottom, 60)   // extra breathing room so the last row's totals are never flush with the scroll edge
         }
+        // Without an explicit bounded height here, the ScrollView sizes itself to fit
+        // *all* of its content rather than the space actually visible in the window,
+        // so there's nothing left to scroll past the last row. Filling the parent's
+        // available space makes the ScrollView clip properly and scroll the rest.
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .sheet(isPresented: $showingEditSheet) {
             editSheetContent()
         }
@@ -214,7 +219,6 @@ struct CompactMonthCalendarView: View {
                 isPresented: $showingEditSheet,
                 onSave: {
                     onSceneChanged()
-                    clearEditingState()
                 },
                 onDelete: {
                     if let id = editingDayId {
@@ -222,7 +226,12 @@ struct CompactMonthCalendarView: View {
                         onSceneChanged()
                     }
                     clearEditingState()
-                }
+                },
+                canGoPrevious: sceneIndex > 0,
+                canGoNext: sceneIndex < shootDays[dayIndex].scenes.count - 1,
+                onPrevious: { editingSceneIndex = sceneIndex - 1 },
+                onNext: { editingSceneIndex = sceneIndex + 1 },
+                positionLabel: "Scene \(sceneIndex + 1) of \(shootDays[dayIndex].scenes.count)"
             )
         } else {
             VStack(spacing: 20) {
@@ -246,25 +255,33 @@ struct CompactMonthCalendarView: View {
         dropTargetDayId == dayId && dropTargetPosition == position
     }
 
+    /// Accepts either a single scene ID or a comma-separated list of scene IDs (dragged
+    /// together from a Boneyard multi-selection) and inserts them, in order, starting at
+    /// targetPosition so a dragged group lands together as a block.
     private func handleSceneDrop(sceneId: String, targetDayId: UUID, targetPosition: Int) {
-        guard let uuid = UUID(uuidString: sceneId) else { return }
+        let ids = sceneId.components(separatedBy: ",").compactMap { UUID(uuidString: $0) }
+        guard !ids.isEmpty else { return }
 
-        // From Boneyard
-        if let idx = allScenes.firstIndex(where: { $0.id == uuid }) {
-            let scene = allScenes.remove(at: idx)
-            insertSceneIntoDay(scene: scene, dayId: targetDayId, position: targetPosition)
-            onSceneChanged()
-            return
-        }
+        var insertPosition = targetPosition
+        for uuid in ids {
+            // From Boneyard
+            if let idx = allScenes.firstIndex(where: { $0.id == uuid }) {
+                let scene = allScenes.remove(at: idx)
+                insertSceneIntoDay(scene: scene, dayId: targetDayId, position: insertPosition)
+                insertPosition += 1
+                continue
+            }
 
-        // From another (or same) day
-        for dayIdx in shootDays.indices {
-            if let sceneIdx = shootDays[dayIdx].scenes.firstIndex(where: { $0.id == uuid }) {
-                let scene = shootDays[dayIdx].scenes.remove(at: sceneIdx)
-                var adjustedPos = targetPosition
-                if shootDays[dayIdx].id == targetDayId && sceneIdx < targetPosition { adjustedPos -= 1 }
-                insertSceneIntoDay(scene: scene, dayId: targetDayId, position: adjustedPos)
-                break
+            // From another (or same) day
+            for dayIdx in shootDays.indices {
+                if let sceneIdx = shootDays[dayIdx].scenes.firstIndex(where: { $0.id == uuid }) {
+                    let scene = shootDays[dayIdx].scenes.remove(at: sceneIdx)
+                    var adjustedPos = insertPosition
+                    if shootDays[dayIdx].id == targetDayId && sceneIdx < insertPosition { adjustedPos -= 1 }
+                    insertSceneIntoDay(scene: scene, dayId: targetDayId, position: adjustedPos)
+                    insertPosition += 1
+                    break
+                }
             }
         }
         onSceneChanged()

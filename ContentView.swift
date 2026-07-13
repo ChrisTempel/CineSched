@@ -5,6 +5,7 @@
 
 import SwiftUI
 import UniformTypeIdentifiers
+import AppKit
 
 // MARK: - Custom UTType for FDX files
 
@@ -58,9 +59,21 @@ struct ContentView: View {
     // Production Setup sheet
     @State private var showingProductionSetup = false
 
-    // Boneyard sort
-    enum BoneyardSort { case defaultOrder, location, intExt, cast, dayNight }
-    @State private var boneyardSort: BoneyardSort = .defaultOrder
+    // Boneyard sort — persisted so your preferred sort (e.g. Location) is still
+    // applied the next time you open the project.
+    enum BoneyardSort: String, CaseIterable { case defaultOrder, location, intExt, cast, dayNight }
+    @AppStorage("CineSchedBoneyardSort") private var boneyardSort: BoneyardSort = .defaultOrder
+
+    // Collapsible sidebar sections — persisted so the layout you leave with is the
+    // layout you come back to. Collapsing "Select Date Range" and "New Scene" frees
+    // up vertical room for the Boneyard, which expands to fill whatever is left.
+    @AppStorage("CineSchedDateRangeExpanded") private var isDateRangeExpanded: Bool = true
+    @AppStorage("CineSchedNewSceneExpanded")  private var isNewSceneExpanded:  Bool = true
+
+    // Boneyard multi-selection — cmd-click toggles, shift-click extends a range
+    // (in current sort order), and a selection of more than one scene drags as a group.
+    @State private var selectedSceneIDs:   Set<UUID> = []
+    @State private var lastSelectedSceneID: UUID?
 
     // MARK: - Computed statistics
 
@@ -100,6 +113,16 @@ struct ContentView: View {
         .onAppear {
             loadDefaultProject()
             loadAppearancePreference()
+            recomputeSortedScenes()
+        }
+        .onChange(of: allScenes) { _, _ in
+            recomputeSortedScenes()
+            // Drop any selected IDs for scenes that have left the Boneyard (scheduled or deleted)
+            let stillPresent = Set(allScenes.map(\.id))
+            selectedSceneIDs = selectedSceneIDs.intersection(stillPresent)
+        }
+        .onChange(of: boneyardSort) { _, _ in
+            recomputeSortedScenes()
         }
         // Debounced auto-save: waits 2 seconds after the last change before writing
         .onChange(of: hasUnsavedChanges) { _, isDirty in
@@ -131,38 +154,54 @@ struct ContentView: View {
 
             Divider().padding(.vertical)
 
-            // Date range picker
-            Group {
+            // Date range picker — collapsible to free up room for the Boneyard
+            DisclosureGroup(isExpanded: $isDateRangeExpanded) {
+                VStack(alignment: .leading, spacing: 10) {
+                    DatePicker("Start Date", selection: $startDate, displayedComponents: .date)
+                        .onChange(of: startDate) { _ in markDirty() }
+                    DatePicker("End Date", selection: $endDate, displayedComponents: .date)
+                        .onChange(of: endDate) { _ in markDirty() }
+
+                    Toggle(isOn: $isShiftModeEnabled) { Text("Shift Schedule") }
+                        .toggleStyle(.switch)
+                        .help("When enabled, changing the Start Date shifts all scenes on the calendar.")
+                        .onChange(of: isShiftModeEnabled) { _ in markDirty() }
+
+                    Button("Update Calendar") { updateShootDays(from: startDate, to: endDate) }
+                }
+                .padding(.top, 6)
+            } label: {
                 Text("Select Date Range").font(.headline)
-                DatePicker("Start Date", selection: $startDate, displayedComponents: .date)
-                    .onChange(of: startDate) { _ in markDirty() }
-                DatePicker("End Date", selection: $endDate, displayedComponents: .date)
-                    .onChange(of: endDate) { _ in markDirty() }
-
-                Toggle(isOn: $isShiftModeEnabled) { Text("Shift Schedule") }
-                    .toggleStyle(.switch)
-                    .help("When enabled, changing the Start Date shifts all scenes on the calendar.")
-                    .onChange(of: isShiftModeEnabled) { _ in markDirty() }
-
-                Button("Update Calendar") { updateShootDays(from: startDate, to: endDate) }
-                    .padding(.top, 5)
-
-                Divider().padding(.vertical)
             }
 
-            NewSceneInputView(
-                newSceneTitle: $newSceneTitle,
-                newDuration:   $newDuration,
-                newEstimate:   $newEstimate,
-                allScenes:     $allScenes,
-                onSceneAdded:  { markDirty() }
-            )
+            Divider().padding(.vertical)
+
+            // New Scene form — collapsible to free up room for the Boneyard
+            DisclosureGroup(isExpanded: $isNewSceneExpanded) {
+                NewSceneInputView(
+                    newSceneTitle: $newSceneTitle,
+                    newDuration:   $newDuration,
+                    newEstimate:   $newEstimate,
+                    allScenes:     $allScenes,
+                    onSceneAdded:  { markDirty() }
+                )
+                .padding(.top, 6)
+            } label: {
+                Text("New Scene").font(.headline)
+            }
 
             Divider().padding(.vertical)
 
             // Boneyard header with sort menu
             HStack {
                 Text("Boneyard").font(.headline)
+                if !selectedSceneIDs.isEmpty {
+                    Text("· \(selectedSceneIDs.count) selected")
+                        .font(.caption).foregroundColor(.accentColor)
+                    Button("Clear") { selectedSceneIDs = []; lastSelectedSceneID = nil }
+                        .buttonStyle(.plain)
+                        .font(.caption).foregroundColor(.secondary)
+                }
                 Spacer()
                 Menu {
                     Button("Default Order") { boneyardSort = .defaultOrder }
@@ -182,12 +221,16 @@ struct ContentView: View {
                 .fixedSize()
             }
 
-            boneyardList
+            Text("⌘-click or ⇧-click to select multiple, then drag as a group")
+                .font(.caption2).foregroundColor(.secondary)
 
-            Spacer()
+            // No trailing Spacer here — the Boneyard list expands to consume
+            // whatever vertical space the collapsed sections above free up.
+            boneyardList
+                .frame(maxHeight: .infinity)
         }
         .padding()
-        .frame(minWidth: 300)
+        .frame(minWidth: 300, maxHeight: .infinity)
     }
 
     // MARK: - Boneyard sort helpers
@@ -229,28 +272,57 @@ struct ContentView: View {
         }
     }
 
-    private var sortedScenes: [(index: Int, scene: Scene)] {
+    // MARK: - Boneyard scene navigation (Previous/Next in edit sheet)
+
+    /// Position of the scene currently being edited within the *displayed* (sorted) Boneyard order.
+    private var currentBoneyardPosition: Int? {
+        guard let idx = editingUnscheduledSceneIndex else { return nil }
+        return sortedScenes.firstIndex { $0.index == idx }
+    }
+
+    private func goToPreviousUnscheduledScene() {
+        guard let pos = currentBoneyardPosition, pos > 0 else { return }
+        let target = sortedScenes[pos - 1]
+        editingUnscheduledSceneIndex = target.index
+        editingUnscheduledScene      = target.scene
+    }
+
+    private func goToNextUnscheduledScene() {
+        guard let pos = currentBoneyardPosition, pos < sortedScenes.count - 1 else { return }
+        let target = sortedScenes[pos + 1]
+        editingUnscheduledSceneIndex = target.index
+        editingUnscheduledScene      = target.scene
+    }
+
+    /// Cached Boneyard ordering. This used to be a computed property, which meant every one
+    /// of its many call sites (drag payload, selection range, position lookups, the list body
+    /// itself) re-sorted the whole Boneyard — regex key extraction included — on every access,
+    /// several times per render. That's what caused the lag when selecting strips. Now it's
+    /// only recomputed when allScenes or boneyardSort actually change (see .onChange below).
+    @State private var sortedScenes: [(index: Int, scene: Scene)] = []
+
+    private func recomputeSortedScenes() {
         let indexed = allScenes.enumerated().map { (index: $0.offset, scene: $0.element) }
         switch boneyardSort {
         case .defaultOrder:
-            return indexed
+            sortedScenes = indexed
         case .location:
-            return indexed.sorted { locationSortKey($0.scene.title) < locationSortKey($1.scene.title) }
+            sortedScenes = indexed.sorted { locationSortKey($0.scene.title) < locationSortKey($1.scene.title) }
         case .intExt:
-            return indexed.sorted {
+            sortedScenes = indexed.sorted {
                 let a = intExtSortKey($0.scene.title)
                 let b = intExtSortKey($1.scene.title)
                 if a != b { return a < b }
                 return locationSortKey($0.scene.title) < locationSortKey($1.scene.title)
             }
         case .cast:
-            return indexed.sorted {
+            sortedScenes = indexed.sorted {
                 let a = $0.scene.cast.sorted().first ?? "ZZZ"
                 let b = $1.scene.cast.sorted().first ?? "ZZZ"
                 return a < b
             }
         case .dayNight:
-            return indexed.sorted {
+            sortedScenes = indexed.sorted {
                 if $0.scene.dayNightType != $1.scene.dayNightType {
                     return $0.scene.dayNightType == .day
                 }
@@ -279,12 +351,21 @@ struct ContentView: View {
                     }
                     .buttonStyle(.plain)
                 }
-                .onDrag { NSItemProvider(object: item.scene.id.uuidString as NSString) }
+                .padding(.vertical, 3).padding(.horizontal, 4)
+                .contentShape(Rectangle())
+                .background(
+                    RoundedRectangle(cornerRadius: 4)
+                        .fill(selectedSceneIDs.contains(item.scene.id) ? Color.accentColor.opacity(0.22) : Color.clear)
+                )
+                .onDrag { dragPayload(for: item.scene) }
                 .help(item.scene.title)
                 .onTapGesture(count: 2) {
                     editingUnscheduledSceneIndex = item.index
                     editingUnscheduledScene      = item.scene
                     showingUnscheduledSceneEditSheet = true
+                }
+                .onTapGesture(count: 1) {
+                    selectScene(item.scene.id)
                 }
                 .contextMenu {
                     Button("Edit Scene") {
@@ -313,6 +394,43 @@ struct ContentView: View {
         }
     }
 
+    // MARK: - Boneyard selection helpers
+
+    /// Applies click / ⌘-click / ⇧-click semantics using the live modifier flags at tap time —
+    /// SwiftUI's plain tap gesture has no modifier parameter on macOS, so we read them directly.
+    private func selectScene(_ id: UUID) {
+        let flags = NSEvent.modifierFlags
+        if flags.contains(.command) {
+            if selectedSceneIDs.contains(id) { selectedSceneIDs.remove(id) } else { selectedSceneIDs.insert(id) }
+            lastSelectedSceneID = id
+        } else if flags.contains(.shift), let anchor = lastSelectedSceneID,
+                  let anchorIdx  = sortedScenes.firstIndex(where: { $0.scene.id == anchor }),
+                  let targetIdx  = sortedScenes.firstIndex(where: { $0.scene.id == id }) {
+            let range = anchorIdx < targetIdx ? anchorIdx...targetIdx : targetIdx...anchorIdx
+            selectedSceneIDs.formUnion(range.map { sortedScenes[$0].scene.id })
+        } else {
+            selectedSceneIDs = [id]
+            lastSelectedSceneID = id
+        }
+    }
+
+    /// Builds the drag payload for a Boneyard row. If the dragged scene is part of a multi-scene
+    /// selection, the whole selection (in current Boneyard sort order) rides along as a comma-
+    /// separated list of scene IDs; otherwise it's treated as a fresh single-scene drag. The
+    /// calendar's drop handling already accepts either a single ID or a comma-separated list.
+    private func dragPayload(for scene: Scene) -> NSItemProvider {
+        let ids: [UUID]
+        if selectedSceneIDs.contains(scene.id), selectedSceneIDs.count > 1 {
+            ids = sortedScenes.map(\.scene).filter { selectedSceneIDs.contains($0.id) }.map(\.id)
+        } else {
+            selectedSceneIDs   = [scene.id]
+            lastSelectedSceneID = scene.id
+            ids = [scene.id]
+        }
+        let payload = ids.map(\.uuidString).joined(separator: ",")
+        return NSItemProvider(object: payload as NSString)
+    }
+
     // MARK: - Detail / main area
 
     private var detailView: some View {
@@ -331,7 +449,9 @@ struct ContentView: View {
                     showCallSheetPDFSavePanel(for: day)
                 }
             )
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .padding()
     }
 
@@ -418,12 +538,17 @@ struct ContentView: View {
             SceneEditSheet(
                 scene: $allScenes[idx],
                 isPresented: $showingUnscheduledSceneEditSheet,
-                onSave: { markDirty(); clearUnscheduledEditingState() },
+                onSave: { markDirty() },
                 onDelete: {
                     if let i = editingUnscheduledSceneIndex { allScenes.remove(at: i) }
                     markDirty()
                     clearUnscheduledEditingState()
-                }
+                },
+                canGoPrevious: (currentBoneyardPosition ?? 0) > 0,
+                canGoNext: currentBoneyardPosition.map { $0 < sortedScenes.count - 1 } ?? false,
+                onPrevious: goToPreviousUnscheduledScene,
+                onNext: goToNextUnscheduledScene,
+                positionLabel: currentBoneyardPosition.map { "Scene \($0 + 1) of \(sortedScenes.count)" }
             )
         } else {
             VStack(spacing: 20) {

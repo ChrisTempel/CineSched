@@ -9,6 +9,14 @@ struct SceneEditSheet: View {
     let onSave:   () -> Void
     let onDelete: () -> Void
 
+    // Optional Previous/Next navigation — when supplied, arrow buttons appear
+    // next to the title so scenes can be edited in sequence without closing the sheet.
+    var canGoPrevious: Bool          = false
+    var canGoNext:     Bool          = false
+    var onPrevious:    (() -> Void)? = nil
+    var onNext:        (() -> Void)? = nil
+    var positionLabel: String?       = nil
+
     @State private var editTitle:         String      = ""
     @State private var editDuration:      String      = ""
     @State private var editEstimatedTime: String      = ""
@@ -19,11 +27,49 @@ struct SceneEditSheet: View {
     @State private var durationIsValid:      Bool = true
     @State private var estimatedTimeIsValid: Bool = true
 
+    private enum Field: Hashable {
+        case title, estimate, cast
+    }
+    @FocusState private var focusedField: Field?
+    @State private var focusDurationTrigger: Bool = false
+
     var body: some View {
         VStack(spacing: 20) {
-            Text("Edit Scene")
-                .font(.title2)
-                .fontWeight(.semibold)
+            HStack {
+                Button {
+                    navigate(onPrevious)
+                } label: {
+                    Image(systemName: "chevron.left")
+                        .frame(width: 16, height: 16)
+                }
+                .buttonStyle(.bordered)
+                .disabled(!canGoPrevious || !isValidInput())
+                .help("Previous Scene")
+                .opacity(onPrevious == nil ? 0 : 1)
+
+                VStack(spacing: 2) {
+                    Text("Edit Scene")
+                        .font(.title2)
+                        .fontWeight(.semibold)
+                    if let positionLabel {
+                        Text(positionLabel)
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                }
+                .frame(maxWidth: .infinity)
+
+                Button {
+                    navigate(onNext)
+                } label: {
+                    Image(systemName: "chevron.right")
+                        .frame(width: 16, height: 16)
+                }
+                .buttonStyle(.bordered)
+                .disabled(!canGoNext || !isValidInput())
+                .help("Next Scene")
+                .opacity(onNext == nil ? 0 : 1)
+            }
 
             VStack(alignment: .leading, spacing: 12) {
 
@@ -31,14 +77,19 @@ struct SceneEditSheet: View {
                 Text("Scene Title").font(.headline)
                 TextField("Scene Title", text: $editTitle)
                     .textFieldStyle(RoundedBorderTextFieldStyle())
+                    .focused($focusedField, equals: .title)
 
                 // Duration
                 VStack(alignment: .leading, spacing: 4) {
                     Text("Duration (pages)").font(.headline)
-                    TextField(FractionParser.placeholderText, text: $editDuration)
-                        .textFieldStyle(RoundedBorderTextFieldStyle())
-                        .border(durationIsValid ? Color.clear : Color.red, width: 1)
-                        .onChange(of: editDuration) { validateDuration() }
+                    SelectAllTextField(
+                        placeholder: FractionParser.placeholderText,
+                        text: $editDuration,
+                        focusTrigger: $focusDurationTrigger
+                    )
+                    .frame(height: 22)
+                    .border(durationIsValid ? Color.clear : Color.red, width: 1)
+                    .onChange(of: editDuration) { validateDuration() }
 
                     if !durationIsValid {
                         Text("Invalid format. Use: 15 (eighths), 1 7/8 (mixed), or 7/8 (fraction)")
@@ -57,6 +108,7 @@ struct SceneEditSheet: View {
                     Text("Estimated Time").font(.headline)
                     TextField(TimeParser.placeholderText, text: $editEstimatedTime)
                         .textFieldStyle(RoundedBorderTextFieldStyle())
+                        .focused($focusedField, equals: .estimate)
                         .border(estimatedTimeIsValid ? Color.clear : Color.red, width: 1)
                         .onChange(of: editEstimatedTime) { validateEstimatedTime() }
 
@@ -76,6 +128,7 @@ struct SceneEditSheet: View {
                     Text("Cast").font(.headline)
                     TextField("John, Mary, Bob", text: $editCastText)
                         .textFieldStyle(RoundedBorderTextFieldStyle())
+                        .focused($focusedField, equals: .cast)
                     Text("Separate names with commas")
                         .font(.caption).foregroundColor(.secondary)
                 }
@@ -143,10 +196,38 @@ struct SceneEditSheet: View {
         }
         .padding(24)
         .frame(width: 550)
-        .onAppear { populateFields() }
+        .onAppear {
+            populateFields()
+            focusDurationField()
+        }
+        .onChange(of: scene.id) {
+            populateFields()
+            focusDurationField()
+        }
     }
 
     // MARK: - Helpers
+
+    /// Duration is the field users almost always need to correct — even on imported
+    /// scenes where every field already has a default value — so focus starts there
+    /// instead of landing on whatever the first empty field happens to be. Using
+    /// SelectAllTextField also means the existing value is selected, so typing
+    /// immediately replaces it rather than requiring a manual select/delete first.
+    /// The dispatch is needed because on macOS a same-frame focus assignment in a
+    /// freshly-presented sheet is often dropped.
+    private func focusDurationField() {
+        DispatchQueue.main.async {
+            focusDurationTrigger = true
+        }
+    }
+
+    /// Saves the current edits (so they aren't lost) and moves to the adjacent scene.
+    private func navigate(_ direction: (() -> Void)?) {
+        guard let direction, isValidInput() else { return }
+        saveChanges()
+        onSave()
+        direction()
+    }
 
     private func populateFields() {
         editTitle         = scene.title

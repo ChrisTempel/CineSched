@@ -16,8 +16,6 @@ struct NewSceneInputView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("New Scene").font(.headline)
-
             TextField("Scene Title", text: $newSceneTitle)
 
             // Duration field — optional for Custom strips
