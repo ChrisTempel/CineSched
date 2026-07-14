@@ -3,6 +3,7 @@
 
 import SwiftUI
 import UniformTypeIdentifiers
+import AppKit
 
 // MARK: - CompactMonthCalendarView
 
@@ -14,6 +15,9 @@ struct CompactMonthCalendarView: View {
     let removeScene:  (Scene, UUID) -> Void
     let projectTitle: String
     let productionInfo: ProductionInfo
+    let isSidebarCollapsed: Bool
+    @Binding var selectedSceneIDs:    Set<UUID>
+    @Binding var lastSelectedSceneID: UUID?
     let onSceneChanged: () -> Void
     let onCallSheetExport: (ShootDay) -> Void   // called when Export PDF tapped in editor
 
@@ -26,6 +30,11 @@ struct CompactMonthCalendarView: View {
 
     // Call sheet state — using sheet(item:) guarantees data is present when sheet renders
     @State private var callSheetDay: ShootDay? = nil
+
+    // "Send to Day" state — lets a selection be moved to a day that isn't currently
+    // scrolled into view, instead of dragging across a long schedule.
+    @State private var showingSendToDaySheet = false
+    @State private var sendToDaySceneIDs: [UUID] = []
 
     // Day rearrange drag/drop state
     @State private var draggingDayId:       UUID? = nil
@@ -58,6 +67,17 @@ struct CompactMonthCalendarView: View {
         }
         .sheet(item: $callSheetDay) { day in
             callSheetEditorContent(for: day)
+        }
+        .sheet(isPresented: $showingSendToDaySheet) {
+            SendToDaySheet(
+                shootDays:  shootDays,
+                sceneCount: sendToDaySceneIDs.count,
+                onSelect: { targetDayId in
+                    sendScenes(sendToDaySceneIDs, toDay: targetDayId)
+                    showingSendToDaySheet = false
+                },
+                onCancel: { showingSendToDaySheet = false }
+            )
         }
         .onChange(of: showingEditSheet) { _, isShowing in
             if !isShowing { clearEditingState() }
@@ -122,11 +142,15 @@ struct CompactMonthCalendarView: View {
                             dayIndex: dayIndex,
                             sceneIndex: sceneIndex,
                             interactingSceneId: $interactingSceneId,
+                            isSelected: selectedSceneIDs.contains(scene.id),
+                            showCast: isSidebarCollapsed,
                             onEdit:      { editScene(dayIndex: dayIndex, sceneIndex: sceneIndex, scene: scene, dayId: day.id) },
                             onRemove:    { removeScene(scene, day.id); onSceneChanged() },
                             onDuplicate: { duplicateScene(scene) },
                             onDragStart: { draggedSceneId = scene.id },
-                            onDragEnd:   { draggedSceneId = nil }
+                            onDragEnd:   { draggedSceneId = nil },
+                            onSelect:    { selectScene(scene, dayId: day.id) },
+                            onSendToDay: { beginSendToDay(scene) }
                         )
                     }
                     .onDrop(of: [UTType.text.identifier], delegate: SceneDropDelegate(
@@ -293,6 +317,77 @@ struct CompactMonthCalendarView: View {
         shootDays[dayIdx].scenes.insert(scene, at: clamped)
     }
 
+    // MARK: - Selection
+
+    /// Applies click / ⌘-click / ⇧-click semantics for scenes on the calendar, reading live
+    /// modifier flags the same way the Boneyard does. A shift-click range only applies when
+    /// the anchor scene is in the same day — reordering "up or down the schedule" doesn't have
+    /// a single obvious axis to range over, so a cross-day shift-click just selects the one scene.
+    private func selectScene(_ scene: Scene, dayId: UUID) {
+        let flags = NSEvent.modifierFlags
+        if flags.contains(.command) {
+            if selectedSceneIDs.contains(scene.id) { selectedSceneIDs.remove(scene.id) } else { selectedSceneIDs.insert(scene.id) }
+            lastSelectedSceneID = scene.id
+        } else if flags.contains(.shift),
+                  let anchor = lastSelectedSceneID,
+                  let dayIdx = shootDays.firstIndex(where: { $0.id == dayId }),
+                  let anchorIdx = shootDays[dayIdx].scenes.firstIndex(where: { $0.id == anchor }),
+                  let targetIdx = shootDays[dayIdx].scenes.firstIndex(where: { $0.id == scene.id }) {
+            let range = anchorIdx < targetIdx ? anchorIdx...targetIdx : targetIdx...anchorIdx
+            selectedSceneIDs.formUnion(range.map { shootDays[dayIdx].scenes[$0].id })
+        } else {
+            selectedSceneIDs = [scene.id]
+            lastSelectedSceneID = scene.id
+        }
+    }
+
+    // MARK: - Send to Day
+
+    /// Right-clicking a scene that's part of the current multi-selection sends the whole
+    /// selection; right-clicking a scene outside the selection sends just that one, mirroring
+    /// the same "act on the selection, or act on what you clicked" rule the Boneyard drag uses.
+    private func beginSendToDay(_ scene: Scene) {
+        if selectedSceneIDs.contains(scene.id), selectedSceneIDs.count > 1 {
+            // Selection is shared with the Boneyard, so a right-click here could be acting on
+            // a mix of scheduled and unscheduled scenes. Order scheduled ones by their existing
+            // calendar position, then append any still-unscheduled selected ones from the
+            // Boneyard, rather than relying on Set's arbitrary iteration order.
+            let scheduledOrdered = shootDays.flatMap { $0.scenes.map(\.id) }.filter { selectedSceneIDs.contains($0) }
+            let boneyardOrdered  = allScenes.map(\.id).filter { selectedSceneIDs.contains($0) }
+            sendToDaySceneIDs = scheduledOrdered + boneyardOrdered
+        } else {
+            sendToDaySceneIDs = [scene.id]
+        }
+        showingSendToDaySheet = true
+    }
+
+    /// Moves the given scenes (from the Boneyard or any day) to the end of the target day,
+    /// preserving the order they're passed in, and clears them from the selection afterward.
+    private func sendScenes(_ ids: [UUID], toDay targetDayId: UUID) {
+        guard let targetIdx = shootDays.firstIndex(where: { $0.id == targetDayId }) else { return }
+        var insertPosition = shootDays[targetIdx].scenes.count
+
+        for uuid in ids {
+            if let idx = allScenes.firstIndex(where: { $0.id == uuid }) {
+                let scene = allScenes.remove(at: idx)
+                insertSceneIntoDay(scene: scene, dayId: targetDayId, position: insertPosition)
+                insertPosition += 1
+                continue
+            }
+            for dayIdx in shootDays.indices {
+                if let sceneIdx = shootDays[dayIdx].scenes.firstIndex(where: { $0.id == uuid }) {
+                    let scene = shootDays[dayIdx].scenes.remove(at: sceneIdx)
+                    insertSceneIntoDay(scene: scene, dayId: targetDayId, position: insertPosition)
+                    insertPosition += 1
+                    break
+                }
+            }
+        }
+
+        selectedSceneIDs.subtract(ids)
+        onSceneChanged()
+    }
+
     private func duplicateScene(_ scene: Scene) {
         allScenes.append(Scene(
             title: scene.title + " (Copy)",
@@ -358,11 +453,15 @@ struct SceneCardView: View {
     let dayIndex:   Int
     let sceneIndex: Int
     @Binding var interactingSceneId: UUID?
+    let isSelected:  Bool
+    let showCast:    Bool
     let onEdit:      () -> Void
     let onRemove:    () -> Void
     let onDuplicate: () -> Void
     let onDragStart: () -> Void
     let onDragEnd:   () -> Void
+    let onSelect:    () -> Void
+    let onSendToDay: () -> Void
 
     private var isDragging: Bool { interactingSceneId == scene.id }
 
@@ -377,33 +476,38 @@ struct SceneCardView: View {
                 Text(scene.title)
                     .font(.caption2).fontWeight(.medium).lineLimit(2)
 
-                HStack {
-                    Text("(\(formattedEighths(scene.duration)), \(formattedTime(scene.estimatedTime)))")
-                        .font(.caption2).foregroundColor(.secondary)
-                    Spacer()
-                    
-                    // Only show DAY/NIGHT label — hide for Custom
-                    if scene.dayNightType != .custom {
-                        Text(scene.dayNightType.displayName)
-                            .font(.caption2).fontWeight(.semibold)
-                            .foregroundColor(scene.dayNightType.color)
-                    }
+                Text("(\(formattedEighths(scene.duration)), \(formattedTime(scene.estimatedTime)))")
+                    .font(.caption2).foregroundColor(.secondary)
+
+                // Cast only shows when the sidebar is collapsed — with the sidebar open there's
+                // not enough width for it to read cleanly, and it's left off the PDF entirely
+                // since PDFExporter never draws it.
+                if showCast, !scene.cast.isEmpty {
+                    Text(scene.cast.joined(separator: ", "))
+                        .font(.caption2).foregroundColor(.secondary).italic()
+                        .lineLimit(1)
+                        .truncationMode(.tail)
                 }
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
         .padding(4)
         .background(
             RoundedRectangle(cornerRadius: 4)
                 .fill(scene.dayNightType.color.opacity(isDragging ? 0.3 : 0.15))
                 .overlay(
                     RoundedRectangle(cornerRadius: 4)
-                        .stroke(scene.dayNightType.color.opacity(isDragging ? 0.8 : 0.4),
-                                lineWidth: isDragging ? 2 : 1)
+                        .stroke(
+                            isSelected ? Color.accentColor : scene.dayNightType.color.opacity(isDragging ? 0.8 : 0.4),
+                            lineWidth: isSelected ? 2 : (isDragging ? 2 : 1)
+                        )
                 )
         )
         .scaleEffect(isDragging ? 1.05 : 1.0)
         .opacity(isDragging ? 0.8 : 1.0)
         .animation(.easeInOut(duration: 0.2), value: isDragging)
+        .help(scene.tooltipText)
         .onDrag {
             interactingSceneId = scene.id
             onDragStart()
@@ -421,12 +525,14 @@ struct SceneCardView: View {
             )
         }
         .onTapGesture(count: 2) { interactingSceneId = nil; onEdit() }
-        .onTapGesture(count: 1) { interactingSceneId = nil }
+        .onTapGesture(count: 1) { interactingSceneId = nil; onSelect() }
         .contextMenu {
             Button("Edit Scene")       { interactingSceneId = nil; onEdit() }
             Button("Remove from Day")  { interactingSceneId = nil; onRemove() }
             Divider()
             Button("Duplicate Scene")  { interactingSceneId = nil; onDuplicate() }
+            Divider()
+            Button("Send to Day…")     { interactingSceneId = nil; onSendToDay() }
         }
         .onChange(of: isDragging) { _, dragging in
             if !dragging { onDragEnd() }

@@ -70,8 +70,10 @@ struct ContentView: View {
     @AppStorage("CineSchedDateRangeExpanded") private var isDateRangeExpanded: Bool = true
     @AppStorage("CineSchedNewSceneExpanded")  private var isNewSceneExpanded:  Bool = true
 
-    // Boneyard multi-selection — cmd-click toggles, shift-click extends a range
-    // (in current sort order), and a selection of more than one scene drags as a group.
+    // Scene multi-selection — shared between the Boneyard and the calendar so a selection
+    // made in one place (e.g. ⇧-click a range) can be dragged or sent-to-day from either.
+    // ⌘-click toggles, ⇧-click extends a range (in whatever order the current view shows),
+    // and a selection of more than one scene moves as a group.
     @State private var selectedSceneIDs:   Set<UUID> = []
     @State private var lastSelectedSceneID: UUID?
 
@@ -84,8 +86,14 @@ struct ContentView: View {
 
     // MARK: - Body
 
+    // Sidebar visibility — tracked explicitly (rather than the default NavigationSplitView
+    // behavior) so the calendar can show more detail on scene strips (cast) when the sidebar
+    // is collapsed and there's more horizontal room to use.
+    @State private var columnVisibility: NavigationSplitViewVisibility = .all
+    private var isSidebarCollapsed: Bool { columnVisibility == .detailOnly }
+
     var body: some View {
-        NavigationSplitView {
+        NavigationSplitView(columnVisibility: $columnVisibility) {
             sidebarView
         } detail: {
             detailView
@@ -117,9 +125,7 @@ struct ContentView: View {
         }
         .onChange(of: allScenes) { _, _ in
             recomputeSortedScenes()
-            // Drop any selected IDs for scenes that have left the Boneyard (scheduled or deleted)
-            let stillPresent = Set(allScenes.map(\.id))
-            selectedSceneIDs = selectedSceneIDs.intersection(stillPresent)
+            pruneSelection()
         }
         .onChange(of: boneyardSort) { _, _ in
             recomputeSortedScenes()
@@ -236,6 +242,16 @@ struct ContentView: View {
     // MARK: - Boneyard sort helpers
 
     /// Strips a leading scene number ("7. ", "12A. ") from a title for sorting purposes.
+    /// Selection is shared between the Boneyard and the calendar, so a scene counts as
+    /// "still present" if it's in either allScenes (Boneyard) or any day's scene list —
+    /// otherwise a selected calendar scene would get silently deselected any time an
+    /// unrelated Boneyard scene was added or removed.
+    private func pruneSelection() {
+        let scheduledIDs = Set(shootDays.flatMap { $0.scenes.map(\.id) })
+        let boneyardIDs  = Set(allScenes.map(\.id))
+        selectedSceneIDs = selectedSceneIDs.intersection(scheduledIDs.union(boneyardIDs))
+    }
+
     private func stripSceneNumber(_ title: String) -> String {
         let pattern = #"^\d+[A-Za-z]?\.\s*"#
         if let range = title.range(of: pattern, options: .regularExpression) {
@@ -358,7 +374,7 @@ struct ContentView: View {
                         .fill(selectedSceneIDs.contains(item.scene.id) ? Color.accentColor.opacity(0.22) : Color.clear)
                 )
                 .onDrag { dragPayload(for: item.scene) }
-                .help(item.scene.title)
+                .help(item.scene.tooltipText)
                 .onTapGesture(count: 2) {
                     editingUnscheduledSceneIndex = item.index
                     editingUnscheduledScene      = item.scene
@@ -444,7 +460,10 @@ struct ContentView: View {
                 removeScene:  removeScene,
                 projectTitle: projectTitle,
                 productionInfo: productionInfo,
-                onSceneChanged: { markDirty() },
+                isSidebarCollapsed: isSidebarCollapsed,
+                selectedSceneIDs: $selectedSceneIDs,
+                lastSelectedSceneID: $lastSelectedSceneID,
+                onSceneChanged: { markDirty(); pruneSelection() },
                 onCallSheetExport: { day in
                     showCallSheetPDFSavePanel(for: day)
                 }

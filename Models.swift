@@ -185,6 +185,25 @@ struct CastMember: Identifiable, Codable, Hashable {
     }
 }
 
+// MARK: - Scene tooltip
+
+extension Scene {
+    /// Hover-tooltip text combining cast and summary — shown via the native macOS tooltip
+    /// (`.help()`) in both the Boneyard and the calendar, which already has the ~1-2 second
+    /// hover delay built in.
+    var tooltipText: String {
+        var lines: [String] = [title]
+        if !cast.isEmpty {
+            lines.append("Cast: " + cast.joined(separator: ", "))
+        }
+        let trimmedSummary = summary.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmedSummary.isEmpty {
+            lines.append(trimmedSummary)
+        }
+        return lines.joined(separator: "\n")
+    }
+}
+
 // MARK: - ProductionInfo
 
 struct ProductionInfo: Codable {
