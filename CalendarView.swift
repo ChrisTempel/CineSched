@@ -143,9 +143,10 @@ struct CompactMonthCalendarView: View {
                             sceneIndex: sceneIndex,
                             interactingSceneId: $interactingSceneId,
                             isSelected: selectedSceneIDs.contains(scene.id),
+                            selectionCount: selectedSceneIDs.count,
                             showCast: isSidebarCollapsed,
                             onEdit:      { editScene(dayIndex: dayIndex, sceneIndex: sceneIndex, scene: scene, dayId: day.id) },
-                            onRemove:    { removeScene(scene, day.id); onSceneChanged() },
+                            onRemove:    { removeFromDay(scene, dayId: day.id) },
                             onDuplicate: { duplicateScene(scene) },
                             onDragStart: { draggedSceneId = scene.id },
                             onDragEnd:   { draggedSceneId = nil },
@@ -341,6 +342,25 @@ struct CompactMonthCalendarView: View {
         }
     }
 
+    // MARK: - Remove from Day
+
+    /// Removes the clicked scene from its day back into the Boneyard — or, if it's part of
+    /// a multi-scene selection, every selected scene that's currently scheduled anywhere on
+    /// the calendar, mirroring the grouping behavior of "Send to Day".
+    private func removeFromDay(_ scene: Scene, dayId: UUID) {
+        if selectedSceneIDs.contains(scene.id), selectedSceneIDs.count > 1 {
+            for dayIdx in shootDays.indices {
+                let matching = shootDays[dayIdx].scenes.filter { selectedSceneIDs.contains($0.id) }
+                for s in matching {
+                    removeScene(s, shootDays[dayIdx].id)
+                }
+            }
+        } else {
+            removeScene(scene, dayId)
+        }
+        onSceneChanged()
+    }
+
     // MARK: - Send to Day
 
     /// Right-clicking a scene that's part of the current multi-selection sends the whole
@@ -453,8 +473,9 @@ struct SceneCardView: View {
     let dayIndex:   Int
     let sceneIndex: Int
     @Binding var interactingSceneId: UUID?
-    let isSelected:  Bool
-    let showCast:    Bool
+    let isSelected:     Bool
+    let selectionCount: Int
+    let showCast:       Bool
     let onEdit:      () -> Void
     let onRemove:    () -> Void
     let onDuplicate: () -> Void
@@ -464,6 +485,7 @@ struct SceneCardView: View {
     let onSendToDay: () -> Void
 
     private var isDragging: Bool { interactingSceneId == scene.id }
+    private var isMultiSelected: Bool { isSelected && selectionCount > 1 }
 
     var body: some View {
         HStack(alignment: .top, spacing: 4) {
@@ -507,7 +529,7 @@ struct SceneCardView: View {
         .scaleEffect(isDragging ? 1.05 : 1.0)
         .opacity(isDragging ? 0.8 : 1.0)
         .animation(.easeInOut(duration: 0.2), value: isDragging)
-        .help(scene.tooltipText)
+        .fastTooltip(scene.tooltipText)
         .onDrag {
             interactingSceneId = scene.id
             onDragStart()
@@ -527,12 +549,17 @@ struct SceneCardView: View {
         .onTapGesture(count: 2) { interactingSceneId = nil; onEdit() }
         .onTapGesture(count: 1) { interactingSceneId = nil; onSelect() }
         .contextMenu {
-            Button("Edit Scene")       { interactingSceneId = nil; onEdit() }
-            Button("Remove from Day")  { interactingSceneId = nil; onRemove() }
+            Button("Edit Scene") { interactingSceneId = nil; onEdit() }
+
+            Button(isMultiSelected ? "Remove \(selectionCount) Scenes from Day" : "Remove from Day") {
+                interactingSceneId = nil; onRemove()
+            }
             Divider()
-            Button("Duplicate Scene")  { interactingSceneId = nil; onDuplicate() }
+            Button("Duplicate Scene") { interactingSceneId = nil; onDuplicate() }
             Divider()
-            Button("Send to Day…")     { interactingSceneId = nil; onSendToDay() }
+            Button(isMultiSelected ? "Send \(selectionCount) Scenes to Day…" : "Send to Day…") {
+                interactingSceneId = nil; onSendToDay()
+            }
         }
         .onChange(of: isDragging) { _, dragging in
             if !dragging { onDragEnd() }

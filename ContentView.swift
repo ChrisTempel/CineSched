@@ -374,7 +374,7 @@ struct ContentView: View {
                         .fill(selectedSceneIDs.contains(item.scene.id) ? Color.accentColor.opacity(0.22) : Color.clear)
                 )
                 .onDrag { dragPayload(for: item.scene) }
-                .help(item.scene.tooltipText)
+                .fastTooltip(item.scene.tooltipText)
                 .onTapGesture(count: 2) {
                     editingUnscheduledSceneIndex = item.index
                     editingUnscheduledScene      = item.scene
