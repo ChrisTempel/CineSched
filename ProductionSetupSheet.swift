@@ -8,6 +8,9 @@ struct ProductionSetupSheet: View {
     @Binding var productionInfo: ProductionInfo
     @Binding var isPresented: Bool
     let onSave: () -> Void
+    /// Called once per renamed character (oldName, newName) when Save is pressed, so the
+    /// caller can propagate the rename into every scene's cast list and existing call sheets.
+    var onCharacterRenamed: (String, String) -> Void = { _, _ in }
 
     @State private var companyName:   String = ""
     @State private var directorName:  String = ""
@@ -59,23 +62,26 @@ struct ProductionSetupSheet: View {
 
                     // Cast list
                     Label("Cast", systemImage: "star").font(.headline)
-                    Text("Enter each actor and the character they play. Scene strips use character names — the app will look up the actor automatically.")
+                    Text("Enter each actor and the character they play. Scene strips use character names — the app will look up the actor automatically. Editing a name here updates it everywhere, including scenes and call sheets already scheduled.")
                         .font(.caption).foregroundColor(.secondary)
 
                     if castList.isEmpty {
                         Text("No cast added yet.").font(.caption).foregroundColor(.secondary)
                     } else {
                         ForEach(Array(castList.enumerated()), id: \.element.id) { index, member in
-                            HStack {
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text(member.actorName.isEmpty ? "Unnamed Actor" : member.actorName)
-                                        .fontWeight(.medium)
-                                    if !member.characterName.isEmpty {
-                                        Text(member.characterName)
-                                            .font(.caption).foregroundColor(.secondary)
-                                    }
-                                }
-                                Spacer()
+                            HStack(spacing: 8) {
+                                TextField("Actor name", text: Binding(
+                                    get: { castList[index].actorName },
+                                    set: { castList[index].actorName = $0 }
+                                ))
+                                .textFieldStyle(RoundedBorderTextFieldStyle())
+
+                                TextField("Character name", text: Binding(
+                                    get: { castList[index].characterName },
+                                    set: { castList[index].characterName = $0 }
+                                ))
+                                .textFieldStyle(RoundedBorderTextFieldStyle())
+
                                 Button { castList.remove(at: index) } label: {
                                     Image(systemName: "minus.circle").foregroundColor(.red)
                                 }
@@ -133,15 +139,18 @@ struct ProductionSetupSheet: View {
                     } else {
                         ForEach(Array(crew.enumerated()), id: \.element.id) { index, member in
                             HStack {
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text(member.name.isEmpty ? "Unnamed" : member.name)
-                                        .fontWeight(.medium)
-                                    if !member.role.isEmpty {
-                                        Text(member.role)
-                                            .font(.caption).foregroundColor(.secondary)
-                                    }
-                                }
-                                .frame(maxWidth: .infinity, alignment: .leading)
+                                TextField("Name", text: Binding(
+                                    get: { crew[index].name },
+                                    set: { crew[index].name = $0 }
+                                ))
+                                .textFieldStyle(RoundedBorderTextFieldStyle())
+
+                                TextField("Role", text: Binding(
+                                    get: { crew[index].role },
+                                    set: { crew[index].role = $0 }
+                                ))
+                                .textFieldStyle(RoundedBorderTextFieldStyle())
+                                .frame(maxWidth: 120)
 
                                 Toggle("", isOn: Binding(
                                     get: { crew[index].isDailyDefault },
@@ -201,6 +210,19 @@ struct ProductionSetupSheet: View {
                 Button("Cancel") { isPresented = false }.buttonStyle(.bordered)
                 Spacer()
                 Button("Save") {
+                    // Detect character renames (same cast member, different character text) by
+                    // matching against the *old* list — still intact in the binding at this
+                    // point, since we haven't overwritten it yet — before applying the edits.
+                    let oldByID = Dictionary(uniqueKeysWithValues: productionInfo.castList.map { ($0.id, $0) })
+                    for member in castList {
+                        if let old = oldByID[member.id],
+                           old.characterName.trimmingCharacters(in: .whitespaces) != member.characterName.trimmingCharacters(in: .whitespaces),
+                           !old.characterName.trimmingCharacters(in: .whitespaces).isEmpty,
+                           !member.characterName.trimmingCharacters(in: .whitespaces).isEmpty {
+                            onCharacterRenamed(old.characterName, member.characterName)
+                        }
+                    }
+
                     productionInfo.companyName   = companyName
                     productionInfo.directorName  = directorName
                     productionInfo.contactNumber = contactNumber

@@ -104,7 +104,63 @@ extension ContentView {
         applyLoadedData(from: data, source: "UserDefaults")
     }
 
+    // MARK: - Current file tracking (persisted across launches)
+
+    private static let currentFileBookmarkKey = "CineSchedCurrentFileBookmark"
+
+    /// Sets currentFileURL and remembers it as a security-scoped bookmark, so "Save" still
+    /// knows where to write silently even after quitting and relaunching the app. A plain
+    /// saved path wouldn't survive a relaunch in a sandboxed app — see the note on
+    /// RecentFilesStore for why a bookmark is required instead.
+    func setCurrentFileURL(_ url: URL) {
+        currentFileURL = url
+        if let bookmark = try? url.bookmarkData(
+            options: .withSecurityScope, includingResourceValuesForKeys: nil, relativeTo: nil
+        ) {
+            UserDefaults.standard.set(bookmark, forKey: Self.currentFileBookmarkKey)
+        }
+    }
+
+    /// Restores the last-known file location on launch. Called from .onAppear. Unlike a
+    /// fresh URL from an NSOpenPanel/NSSavePanel (which already carries an implicit access
+    /// grant for the running session), a URL resolved from a bookmark needs an explicit
+    /// `startAccessingSecurityScopedResource()` call — and that access is deliberately never
+    /// stopped afterward, since this URL stays "live" as the file silent Saves write to for
+    /// the rest of this session. It's released automatically when the app quits.
+    func restoreCurrentFileURL() {
+        guard let bookmarkData = UserDefaults.standard.data(forKey: Self.currentFileBookmarkKey) else { return }
+        var isStale = false
+        guard let url = try? URL(resolvingBookmarkData: bookmarkData, options: .withSecurityScope,
+                                  relativeTo: nil, bookmarkDataIsStale: &isStale),
+              url.startAccessingSecurityScopedResource() else { return }
+        currentFileURL = url
+        if isStale {
+            // The file moved since this bookmark was created; refresh it for next time.
+            if let refreshed = try? url.bookmarkData(options: .withSecurityScope, includingResourceValuesForKeys: nil, relativeTo: nil) {
+                UserDefaults.standard.set(refreshed, forKey: Self.currentFileBookmarkKey)
+            }
+        }
+    }
+
+    /// The folder to default file panels to: wherever the project was last saved to or
+    /// loaded from, if anywhere yet — otherwise nil, which leaves NSSavePanel/NSOpenPanel
+    /// to fall back to their own naturally-remembered last location instead of always
+    /// forcing Documents.
+    var defaultPanelDirectory: URL? {
+        currentFileURL?.deletingLastPathComponent()
+    }
+
     // MARK: - Manual save (native NSSavePanel)
+
+    /// "Save": writes silently to the file this project was last saved to or loaded from,
+    /// if any; otherwise behaves like "Save As…" since there's nowhere yet to save to.
+    func saveProject() {
+        if let url = currentFileURL {
+            saveProjectDirectly(to: url)
+        } else {
+            showNativeSaveDialog()
+        }
+    }
 
     func showNativeSaveDialog() {
         let panel = NSSavePanel()
@@ -115,9 +171,7 @@ extension ContentView {
         panel.allowedContentTypes = [.json]
         panel.canCreateDirectories = true
         panel.isExtensionHidden  = false
-        if let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first {
-            panel.directoryURL = docs
-        }
+        if let dir = defaultPanelDirectory { panel.directoryURL = dir }
         panel.begin { [self] response in
             DispatchQueue.main.async {
                 guard response == .OK, let url = panel.url else { return }
@@ -127,6 +181,7 @@ extension ContentView {
     }
 
     func saveProjectDirectly(to url: URL) {
+        _ = url.startAccessingSecurityScopedResource()
         let projectData = ProjectData(
             allScenes: allScenes,
             shootDays: shootDays,
@@ -138,6 +193,8 @@ extension ContentView {
         do {
             let data = try ProjectFile.encode(projectData)
             try data.write(to: url)
+            setCurrentFileURL(url)
+            recentFiles.record(url)
             alertMessage = "Schedule saved successfully to: \(url.lastPathComponent)"
             showingAlert = true
             print("Saved to: \(url.path)")
@@ -151,16 +208,17 @@ extension ContentView {
     // MARK: - Load from file
 
     func loadProject(from url: URL) {
-        guard url.startAccessingSecurityScopedResource() else {
-            alertMessage = "Unable to access the selected file."
-            showingAlert = true
-            return
-        }
-        defer { url.stopAccessingSecurityScopedResource() }
+        // Intentionally not using a defer-scoped stop here: this URL is about to become
+        // the current project file, and needs to stay writable for silent Saves for the
+        // rest of this session — not just for this one read. Access is released
+        // automatically when the app quits.
+        _ = url.startAccessingSecurityScopedResource()
 
         do {
             let data = try Data(contentsOf: url)
             applyLoadedData(from: data, source: url.lastPathComponent)
+            setCurrentFileURL(url)
+            recentFiles.record(url)
         } catch {
             alertMessage = "Failed to load project: \(error.localizedDescription)"
             showingAlert = true
@@ -209,20 +267,6 @@ extension ContentView {
         print("Failed to decode data from \(source)")
     }
 
-    // MARK: - Appearance preference
-
-    func saveAppearancePreference() {
-        UserDefaults.standard.set(isDarkMode, forKey: "CineSchedDarkMode")
-    }
-
-    func loadAppearancePreference() {
-        if UserDefaults.standard.object(forKey: "CineSchedDarkMode") != nil {
-            isDarkMode = UserDefaults.standard.bool(forKey: "CineSchedDarkMode")
-        } else {
-            isDarkMode = false
-        }
-    }
-
     // MARK: - Utilities
 
     func clearAllScenes() {
@@ -252,6 +296,7 @@ extension ContentView {
         panel.allowedContentTypes  = [.json]
         panel.allowsMultipleSelection = false
         panel.canChooseDirectories = false
+        if let dir = defaultPanelDirectory { panel.directoryURL = dir }
         panel.begin { [self] response in
             DispatchQueue.main.async {
                 guard response == .OK, let url = panel.url else { return }
@@ -330,6 +375,22 @@ extension ContentView {
         )
     }
 
+    func showDaysOutOfDaysPDFSavePanel() {
+        guard let pdfData = DaysOutOfDaysExporter.generatePDF(
+            shootDays: shootDays,
+            projectTitle: projectTitle,
+            productionInfo: productionInfo
+        ) else {
+            alertMessage = "Couldn't generate a Days Out of Days report — add cast to your scenes and Production Setup first."
+            showingAlert = true
+            return
+        }
+        showPDFSavePanel(
+            data: pdfData,
+            defaultName: sanitizeFilename("\(projectTitle.isEmpty ? "MovieSchedule" : projectTitle)_DOoD")
+        )
+    }
+
     func showCallSheetPDFSavePanel(for day: ShootDay) {
         guard let pdfData = CallSheetExporter.generatePDF(
             shootDay: day,
@@ -354,9 +415,7 @@ extension ContentView {
         panel.allowedContentTypes  = [.pdf]
         panel.canCreateDirectories = true
         panel.isExtensionHidden    = false
-        if let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first {
-            panel.directoryURL = docs
-        }
+        if let dir = defaultPanelDirectory { panel.directoryURL = dir }
         panel.begin { [self] response in
             DispatchQueue.main.async {
                 guard response == .OK, let url = panel.url else { return }

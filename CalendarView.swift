@@ -62,6 +62,7 @@ struct CompactMonthCalendarView: View {
         // so there's nothing left to scroll past the last row. Filling the parent's
         // available space makes the ScrollView clip properly and scroll the rest.
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .tooltipContainer()
         .sheet(isPresented: $showingEditSheet) {
             editSheetContent()
         }
@@ -546,8 +547,8 @@ struct SceneCardView: View {
                     .shadow(radius: 4)
             )
         }
-        .onTapGesture(count: 2) { interactingSceneId = nil; onEdit() }
-        .onTapGesture(count: 1) { interactingSceneId = nil; onSelect() }
+        .simultaneousGesture(TapGesture(count: 2).onEnded { interactingSceneId = nil; onEdit() })
+        .simultaneousGesture(TapGesture(count: 1).onEnded { interactingSceneId = nil; onSelect() })
         .contextMenu {
             Button("Edit Scene") { interactingSceneId = nil; onEdit() }
 

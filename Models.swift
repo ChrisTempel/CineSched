@@ -92,27 +92,42 @@ struct Location: Identifiable, Codable, Hashable {
 struct CallSheetData: Codable {
     var generalCallTime: String
     var locations:       [Location]
-    var castOverride:    [String]?
-    var crewOverride:    [String]?
+    var castOverride:    [String]?       // raw character names (NOT resolved "Actor — Character" text) so
+                                          // renaming an actor or character always re-resolves correctly,
+                                          // even for a day whose cast list was manually edited
+    var crewOverride:    [String]?       // legacy, pre-3.4 saves only — mixed roster display-strings and
+                                          // one-off names together; kept so old project files still decode
+    var crewIDOverride:  [UUID]?         // roster CrewMember IDs explicitly selected for this day — an ID
+                                          // reference instead of frozen text, so a roster rename ripples
+                                          // through automatically
+    var crewOneOffs:     [String]?       // free-typed crew not in the roster; these have no stable identity
+                                          // to rename, so they're just kept as plain text
     var notes:           String
 
     init(
-        generalCallTime: String    = "",
+        generalCallTime: String     = "",
         locations:       [Location] = [],
         castOverride:    [String]?  = nil,
         crewOverride:    [String]?  = nil,
+        crewIDOverride:  [UUID]?    = nil,
+        crewOneOffs:     [String]?  = nil,
         notes:           String    = ""
     ) {
         self.generalCallTime = generalCallTime
         self.locations       = locations
         self.castOverride    = castOverride
         self.crewOverride    = crewOverride
+        self.crewIDOverride  = crewIDOverride
+        self.crewOneOffs     = crewOneOffs
         self.notes           = notes
     }
 
+    /// Resolves the raw character names (auto-pulled from scenes, or the manually-edited
+    /// override) to "Actor — Character" using the *current* cast list — always live, so a
+    /// rename in Production Setup is reflected immediately, whether or not this day's cast
+    /// has ever been manually edited.
     func resolvedCast(from scenes: [Scene], productionInfo: ProductionInfo? = nil) -> [String] {
-        if let override = castOverride { return override }
-        let characters = Array(Set(scenes.flatMap { $0.cast })).sorted()
+        let characters = castOverride ?? Array(Set(scenes.flatMap { $0.cast })).sorted()
         guard let production = productionInfo, !production.castList.isEmpty else {
             return characters
         }
@@ -127,8 +142,20 @@ struct CallSheetData: Codable {
         }
     }
 
+    /// Resolves selected crew to "Name — Role" using the *current* roster for anyone selected
+    /// by ID, so a name/role edit in Production Setup ripples through immediately. One-off
+    /// crew (not in the roster) are plain text with no identity to resolve.
     func resolvedCrew(productionInfo: ProductionInfo) -> [String] {
-        if let override = crewOverride { return override }
+        if crewIDOverride != nil || crewOneOffs != nil {
+            let roster = productionInfo.crew
+            let selected = (crewIDOverride ?? []).compactMap { id in
+                roster.first(where: { $0.id == id })?.displayString
+            }
+            return selected + (crewOneOffs ?? [])
+        }
+        // Pre-3.4 project file that hasn't been re-saved since: fall back to the old frozen
+        // text so nothing appears to vanish, but it won't ripple until the day is saved again.
+        if let legacy = crewOverride { return legacy }
         return productionInfo.crew
             .filter { $0.isDailyDefault }
             .map    { $0.displayString }

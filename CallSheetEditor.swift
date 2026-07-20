@@ -12,7 +12,7 @@ struct CallSheetEditor: View {
 
     @State private var callTime:     String     = ""
     @State private var locations:    [Location] = []
-    @State private var castList:     [String]   = []
+    @State private var castCharacters: [String] = []   // raw character names, NOT "Actor — Character" text
     @State private var castIsEdited: Bool       = false
     @State private var notes:        String     = ""
 
@@ -33,6 +33,19 @@ struct CallSheetEditor: View {
     private var dailyRoster:    [CrewMember] { productionInfo.crew.filter {  $0.isDailyDefault } }
     private var specialtyRoster: [CrewMember] { productionInfo.crew.filter { !$0.isDailyDefault } }
     private var allRosterEntries: [CrewMember] { dailyRoster + specialtyRoster }
+
+    /// Resolves a raw character name to "Actor — Character" using the *current* cast list,
+    /// live — so an actor/character rename in Production Setup shows up immediately here,
+    /// even before this call sheet is saved again.
+    private func displayText(forCharacter character: String) -> String {
+        if let match = productionInfo.castList.first(where: {
+            $0.characterName.trimmingCharacters(in: .whitespaces)
+                .caseInsensitiveCompare(character.trimmingCharacters(in: .whitespaces)) == .orderedSame
+        }) {
+            return match.displayString
+        }
+        return character
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -132,8 +145,8 @@ struct CallSheetEditor: View {
                         Spacer()
                         if castIsEdited {
                             Button("Reset to Auto") {
-                                castList     = shootDay.allCast
-                                castIsEdited = false
+                                castCharacters = shootDay.allCast
+                                castIsEdited   = false
                             }
                             .font(.caption).foregroundColor(.secondary).buttonStyle(.plain)
                         } else {
@@ -141,14 +154,14 @@ struct CallSheetEditor: View {
                         }
                     }
 
-                    if castList.isEmpty {
+                    if castCharacters.isEmpty {
                         Text("No cast assigned to scenes on this day.").font(.caption).foregroundColor(.secondary)
                     } else {
-                        ForEach(Array(castList.enumerated()), id: \.offset) { index, member in
+                        ForEach(Array(castCharacters.enumerated()), id: \.offset) { index, character in
                             HStack {
-                                Text(member)
+                                Text(displayText(forCharacter: character))
                                 Spacer()
-                                Button { castList.remove(at: index); castIsEdited = true } label: {
+                                Button { castCharacters.remove(at: index); castIsEdited = true } label: {
                                     Image(systemName: "minus.circle").foregroundColor(.red)
                                 }
                                 .buttonStyle(.plain)
@@ -159,12 +172,12 @@ struct CallSheetEditor: View {
                     }
 
                     HStack {
-                        TextField("Add cast member", text: $newCastMember)
+                        TextField("Add cast member (character name)", text: $newCastMember)
                             .textFieldStyle(RoundedBorderTextFieldStyle())
                         Button {
                             let trimmed = newCastMember.trimmingCharacters(in: .whitespaces)
                             guard !trimmed.isEmpty else { return }
-                            castList.append(trimmed); newCastMember = ""; castIsEdited = true
+                            castCharacters.append(trimmed); newCastMember = ""; castIsEdited = true
                         } label: {
                             Image(systemName: "plus.circle.fill").foregroundColor(.blue)
                         }
@@ -303,22 +316,27 @@ struct CallSheetEditor: View {
         locations = shootDay.callSheet.locations
         notes     = shootDay.callSheet.notes
 
-        // Cast
+        // Cast — always raw character names now
         if let override = shootDay.callSheet.castOverride {
-            castList = override; castIsEdited = true
+            castCharacters = override; castIsEdited = true
         } else {
-            castList     = shootDay.callSheet.resolvedCast(from: shootDay.scenes, productionInfo: productionInfo)
-            castIsEdited = false
+            castCharacters = shootDay.allCast
+            castIsEdited   = false
         }
 
-        // Crew — build checked array from saved override or daily defaults
+        // Crew — build checked array from the new ID-based override, or migrate a legacy
+        // text-based one the first time this day is opened after upgrading
         let roster = allRosterEntries
-        if let override = shootDay.callSheet.crewOverride {
-            // Reconstruct checked state: a roster member is checked if their displayString is in the override
-            crewChecked = roster.map { member in override.contains(member.displayString) }
-            // One-offs: override entries not matching any roster member
+        if shootDay.callSheet.crewIDOverride != nil || shootDay.callSheet.crewOneOffs != nil {
+            let selectedIDs = Set(shootDay.callSheet.crewIDOverride ?? [])
+            crewChecked = roster.map { selectedIDs.contains($0.id) }
+            crewOneOffs = shootDay.callSheet.crewOneOffs ?? []
+        } else if let legacy = shootDay.callSheet.crewOverride {
+            // One-time best-effort migration: match old frozen display strings against the
+            // current roster. Saving this day will replace it with the ID-based override.
+            crewChecked = roster.map { legacy.contains($0.displayString) }
             let rosterStrings = Set(roster.map { $0.displayString })
-            crewOneOffs = override.filter { !rosterStrings.contains($0) }
+            crewOneOffs = legacy.filter { !rosterStrings.contains($0) }
         } else {
             // No override yet — default: daily members checked, specialty unchecked
             crewChecked = roster.map { $0.isDailyDefault }
@@ -330,17 +348,16 @@ struct CallSheetEditor: View {
         shootDay.callSheet.generalCallTime = callTime
         shootDay.callSheet.locations       = locations
         shootDay.callSheet.notes           = notes
-        shootDay.callSheet.castOverride    = castIsEdited ? castList : nil
+        shootDay.callSheet.castOverride    = castIsEdited ? castCharacters : nil
 
-        // Build crew override: checked roster members + one-offs
+        // Build the new ID-based crew override: checked roster members by ID + one-offs by name
         let roster = allRosterEntries
-        var selectedCrew: [String] = []
-        for (i, member) in roster.enumerated() {
-            if i < crewChecked.count && crewChecked[i] {
-                selectedCrew.append(member.displayString)
-            }
+        var selectedIDs: [UUID] = []
+        for (i, member) in roster.enumerated() where i < crewChecked.count && crewChecked[i] {
+            selectedIDs.append(member.id)
         }
-        selectedCrew += crewOneOffs
-        shootDay.callSheet.crewOverride = selectedCrew.isEmpty ? nil : selectedCrew
+        shootDay.callSheet.crewIDOverride = selectedIDs
+        shootDay.callSheet.crewOneOffs    = crewOneOffs
+        shootDay.callSheet.crewOverride   = nil   // fully migrated off the legacy text-based field
     }
 }

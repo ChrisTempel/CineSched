@@ -54,7 +54,15 @@ struct ContentView: View {
     @State private var editingUnscheduledSceneIndex: Int?
 
     // Appearance
-    @State var isDarkMode: Bool = false
+    @AppStorage("CineSchedDarkMode") var isDarkMode: Bool = false
+    @EnvironmentObject var recentFiles: RecentFilesStore
+    /// The file this project was last saved to or loaded from — nil for a project that's
+    /// never touched disk yet. "Save" writes here silently when set; "Save As…" always
+    /// prompts and updates this to the newly chosen location. Persisted across launches
+    /// (see setCurrentFileURL/restoreCurrentFileURL in ProjectStore.swift) — otherwise
+    /// every first Save after relaunching the app would have nowhere remembered to save
+    /// to and would silently fall back to acting like Save As.
+    @State var currentFileURL: URL? = nil
 
     // Production Setup sheet
     @State private var showingProductionSetup = false
@@ -115,13 +123,42 @@ struct ContentView: View {
             ProductionSetupSheet(
                 productionInfo: $productionInfo,
                 isPresented: $showingProductionSetup,
-                onSave: { markDirty() }
+                onSave: { markDirty() },
+                onCharacterRenamed: renameCastCharacter
             )
         }
         .onAppear {
             loadDefaultProject()
-            loadAppearancePreference()
+            restoreCurrentFileURL()
             recomputeSortedScenes()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .csNewProject)) { _ in
+            showingClearAllConfirmation = true
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .csOpenProject)) { _ in
+            showJSONOpenPanel()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .csOpenRecentProject)) { note in
+            guard let url = note.object as? URL else { return }
+            loadProject(from: url)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .csImportScript)) { _ in
+            showFDXOpenPanel()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .csSaveProject)) { _ in
+            saveProject()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .csSaveProjectAs)) { _ in
+            showNativeSaveDialog()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .csExportSchedulePDF)) { _ in
+            showSchedulePDFSavePanel()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .csExportDaysOutOfDays)) { _ in
+            showDaysOutOfDaysPDFSavePanel()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .csOpenProductionSetup)) { _ in
+            showingProductionSetup = true
         }
         .onChange(of: allScenes) { _, _ in
             recomputeSortedScenes()
@@ -252,6 +289,35 @@ struct ContentView: View {
         selectedSceneIDs = selectedSceneIDs.intersection(scheduledIDs.union(boneyardIDs))
     }
 
+    /// Renames a character everywhere it appears in scene cast lists — both unscheduled
+    /// (Boneyard) scenes and every scheduled day — so a rename in Production Setup keeps
+    /// matching up with the actor lookup used by cast lists and call sheets, instead of
+    /// silently going stale the moment the character's name changes.
+    private func renameCastCharacter(from oldName: String, to newName: String) {
+        let old = oldName.trimmingCharacters(in: .whitespaces)
+        let new = newName.trimmingCharacters(in: .whitespaces)
+        guard !old.isEmpty, !new.isEmpty, old.caseInsensitiveCompare(new) != .orderedSame else { return }
+
+        func renamed(_ cast: [String]) -> [String] {
+            cast.map { $0.caseInsensitiveCompare(old) == .orderedSame ? new : $0 }
+        }
+
+        for i in allScenes.indices {
+            allScenes[i].cast = renamed(allScenes[i].cast)
+        }
+        for d in shootDays.indices {
+            for s in shootDays[d].scenes.indices {
+                shootDays[d].scenes[s].cast = renamed(shootDays[d].scenes[s].cast)
+            }
+            // A day's cast override (if manually edited) also stores raw character names,
+            // so it needs the same rename applied to stay in sync.
+            if let override = shootDays[d].callSheet.castOverride {
+                shootDays[d].callSheet.castOverride = renamed(override)
+            }
+        }
+        markDirty()
+    }
+
     private func stripSceneNumber(_ title: String) -> String {
         let pattern = #"^\d+[A-Za-z]?\.\s*"#
         if let range = title.range(of: pattern, options: .regularExpression) {
@@ -350,64 +416,72 @@ struct ContentView: View {
     // MARK: - Boneyard list
 
     private var boneyardList: some View {
-        List {
-            ForEach(sortedScenes, id: \.scene.id) { item in
-                HStack {
-                    Circle().fill(item.scene.dayNightType.color).frame(width: 8, height: 8)
-                    Text(item.scene.title)
-                    Spacer()
-                    Text(item.scene.dayNightType == .day ? "D" : "N")
-                        .font(.caption).foregroundColor(item.scene.dayNightType.color).fontWeight(.semibold)
-                    Text("\(FractionParser.formatEighths(item.scene.duration)) / \(formattedTime(item.scene.estimatedTime))")
-                    Button {
-                        allScenes.remove(at: item.index)
-                        markDirty()
-                    } label: {
-                        Image(systemName: "trash").foregroundColor(.red).help("Delete Scene")
+        ScrollView {
+            VStack(spacing: 0) {
+                ForEach(sortedScenes, id: \.scene.id) { item in
+                    HStack {
+                        Circle().fill(item.scene.dayNightType.color).frame(width: 8, height: 8)
+                        Text(item.scene.title)
+                        Spacer()
+                        Text(item.scene.dayNightType == .day ? "D" : "N")
+                            .font(.caption).foregroundColor(item.scene.dayNightType.color).fontWeight(.semibold)
+                        Text("\(FractionParser.formatEighths(item.scene.duration)) / \(formattedTime(item.scene.estimatedTime))")
+                        Button {
+                            allScenes.remove(at: item.index)
+                            markDirty()
+                        } label: {
+                            Image(systemName: "trash").foregroundColor(.red).help("Delete Scene")
+                        }
+                        .buttonStyle(.plain)
                     }
-                    .buttonStyle(.plain)
-                }
-                .padding(.vertical, 3).padding(.horizontal, 4)
-                .contentShape(Rectangle())
-                .background(
-                    RoundedRectangle(cornerRadius: 4)
-                        .fill(selectedSceneIDs.contains(item.scene.id) ? Color.accentColor.opacity(0.22) : Color.clear)
-                )
-                .onDrag { dragPayload(for: item.scene) }
-                .fastTooltip(item.scene.tooltipText)
-                .onTapGesture(count: 2) {
-                    editingUnscheduledSceneIndex = item.index
-                    editingUnscheduledScene      = item.scene
-                    showingUnscheduledSceneEditSheet = true
-                }
-                .onTapGesture(count: 1) {
-                    selectScene(item.scene.id)
-                }
-                .contextMenu {
-                    Button("Edit Scene") {
-                        editingUnscheduledSceneIndex = item.index
-                        editingUnscheduledScene      = item.scene
-                        showingUnscheduledSceneEditSheet = true
-                    }
-                    Button("Duplicate Scene") {
-                        allScenes.append(Scene(
-                            title:         item.scene.title + " (Copy)",
-                            duration:      item.scene.duration,
-                            estimatedTime: item.scene.estimatedTime,
-                            dayNightType:  item.scene.dayNightType,
-                            cast:          item.scene.cast,
-                            summary:       item.scene.summary
-                        ))
-                        markDirty()
+                    .padding(.vertical, 3).padding(.horizontal, 4)
+                    .contentShape(Rectangle())
+                    .background(
+                        RoundedRectangle(cornerRadius: 4)
+                            .fill(selectedSceneIDs.contains(item.scene.id) ? Color.accentColor.opacity(0.22) : Color.white.opacity(0.001))
+                    )
+                    .onDrag { dragPayload(for: item.scene) }
+                    .fastTooltip(item.scene.tooltipText)
+                    .simultaneousGesture(
+                        TapGesture(count: 2).onEnded {
+                            editingUnscheduledSceneIndex = item.index
+                            editingUnscheduledScene      = item.scene
+                            showingUnscheduledSceneEditSheet = true
+                        }
+                    )
+                    .simultaneousGesture(
+                        TapGesture(count: 1).onEnded {
+                            selectScene(item.scene.id)
+                        }
+                    )
+                    .contextMenu {
+                        Button("Edit Scene") {
+                            editingUnscheduledSceneIndex = item.index
+                            editingUnscheduledScene      = item.scene
+                            showingUnscheduledSceneEditSheet = true
+                        }
+                        Button("Duplicate Scene") {
+                            allScenes.append(Scene(
+                                title:         item.scene.title + " (Copy)",
+                                duration:      item.scene.duration,
+                                estimatedTime: item.scene.estimatedTime,
+                                dayNightType:  item.scene.dayNightType,
+                                cast:          item.scene.cast,
+                                summary:       item.scene.summary
+                            ))
+                            markDirty()
+                        }
+                        Divider()
+                        Button("Delete Scene", role: .destructive) {
+                            allScenes.remove(at: item.index)
+                            markDirty()
+                        }
                     }
                     Divider()
-                    Button("Delete Scene", role: .destructive) {
-                        allScenes.remove(at: item.index)
-                        markDirty()
-                    }
                 }
             }
         }
+        .tooltipContainer()
     }
 
     // MARK: - Boneyard selection helpers
@@ -478,62 +552,20 @@ struct ContentView: View {
 
     private var toolbarRow: some View {
         HStack {
-            HStack(spacing: 12) {
-                Button("New") { showingClearAllConfirmation = true }
-                    .buttonStyle(.bordered).foregroundColor(.red)
+            Text(projectTitle.isEmpty ? "Untitled Movie" : projectTitle)
+                .font(.headline).fontWeight(.semibold)
+                .lineLimit(1).truncationMode(.tail)
+                .frame(maxWidth: 200)
 
-                Button("Production Setup") { showingProductionSetup = true }
-                    .buttonStyle(.bordered)
-                    .help("Set production company, director, contact, and crew for call sheets")
+            Divider().frame(height: 20)
 
-                Button("Import Script") { showFDXOpenPanel() }
-                    .buttonStyle(.bordered)
-                    .help("Import scenes from Final Draft (.fdx)")
-
-                Button("Save") { showNativeSaveDialog() }
-                    .buttonStyle(.bordered)
-
-                Button("Load") { showJSONOpenPanel() }
-                    .buttonStyle(.bordered)
-
-                Button("Export PDF") { showSchedulePDFSavePanel() }
-                    .buttonStyle(.borderedProminent)
-
-                Button {
-                    withAnimation(.easeInOut(duration: 0.3)) {
-                        isDarkMode.toggle()
-                        saveAppearancePreference()
-                    }
-                } label: {
-                    HStack(spacing: 6) {
-                        Image(systemName: isDarkMode ? "sun.max.fill" : "moon.fill")
-                            .foregroundColor(isDarkMode ? .yellow : .blue)
-                            .font(.system(size: 14, weight: .semibold))
-                        Text(isDarkMode ? "Light" : "Dark")
-                            .font(.caption).fontWeight(.medium)
-                    }
-                }
-                .buttonStyle(.bordered)
-                .help(isDarkMode ? "Switch to Light Mode" : "Switch to Dark Mode")
+            HStack(spacing: 15) {
+                statBadge(icon: "calendar", value: "\(scheduledDays.count)", label: "days",   color: .blue)
+                statBadge(icon: "film",     value: "\(totalScenes)",          label: "scenes", color: .green)
+                statBadge(icon: "clock",    value: totalEstTime,              label: nil,      color: .purple)
             }
 
             Spacer()
-
-            // Compact statistics
-            HStack(spacing: 20) {
-                Text(projectTitle.isEmpty ? "Untitled Movie" : projectTitle)
-                    .font(.headline).fontWeight(.semibold)
-                    .lineLimit(1).truncationMode(.tail)
-                    .frame(maxWidth: 200)
-
-                Divider().frame(height: 20)
-
-                HStack(spacing: 15) {
-                    statBadge(icon: "calendar", value: "\(scheduledDays.count)", label: "days",   color: .blue)
-                    statBadge(icon: "film",     value: "\(totalScenes)",          label: "scenes", color: .green)
-                    statBadge(icon: "clock",    value: totalEstTime,              label: nil,      color: .purple)
-                }
-            }
         }
         .padding(.bottom)
     }
