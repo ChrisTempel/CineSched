@@ -309,9 +309,19 @@ extension ContentView {
         let panel = NSOpenPanel()
         panel.title                = "Import Final Draft Script"
         panel.prompt               = "Import"
-        panel.allowedContentTypes  = [.init(importedAs: "com.finaldraft.fdx"), .xml]
+        // UTType(filenameExtension:) matches by extension alone, so this works whether or
+        // not Final Draft is installed. UTType(importedAs: "com.finaldraft.fdx") — the
+        // previous approach — only actually resolves once Final Draft itself registers
+        // that type with macOS, so on a machine without Final Draft, .fdx files would show
+        // up grayed out and unselectable in this panel even though the parser below has
+        // never depended on Final Draft being present at all.
+        var allowedTypes: [UTType] = []
+        if let fdxType = UTType(filenameExtension: "fdx") { allowedTypes.append(fdxType) }
+        allowedTypes.append(.xml)
+        panel.allowedContentTypes  = allowedTypes
         panel.allowsMultipleSelection = false
         panel.canChooseDirectories = false
+        if let dir = defaultPanelDirectory { panel.directoryURL = dir }
         panel.begin { [self] response in
             DispatchQueue.main.async {
                 guard response == .OK, let url = panel.url else { return }
