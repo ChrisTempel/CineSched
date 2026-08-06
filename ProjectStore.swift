@@ -389,7 +389,8 @@ extension ContentView {
         guard let pdfData = DaysOutOfDaysExporter.generatePDF(
             shootDays: shootDays,
             projectTitle: projectTitle,
-            productionInfo: productionInfo
+            productionInfo: productionInfo,
+            includeHold: includeHoldInDOOD
         ) else {
             alertMessage = "Couldn't generate a Days Out of Days report — add cast to your scenes and Production Setup first."
             showingAlert = true
@@ -398,6 +399,22 @@ extension ContentView {
         showPDFSavePanel(
             data: pdfData,
             defaultName: sanitizeFilename("\(projectTitle.isEmpty ? "MovieSchedule" : projectTitle)_DOoD")
+        )
+    }
+
+    func showBreakdownPDFSavePanel() {
+        guard let pdfData = BreakdownExporter.generatePDF(
+            shootDays: shootDays,
+            allScenes: allScenes,
+            projectTitle: projectTitle
+        ) else {
+            alertMessage = "Couldn't generate scene breakdowns — add some scenes first."
+            showingAlert = true
+            return
+        }
+        showPDFSavePanel(
+            data: pdfData,
+            defaultName: sanitizeFilename("\(projectTitle.isEmpty ? "MovieSchedule" : projectTitle)_Breakdowns")
         )
     }
 

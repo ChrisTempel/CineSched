@@ -22,6 +22,13 @@ extension Notification.Name {
     static let csExportDaysOutOfDays = Notification.Name("CineSched.exportDaysOutOfDays")
     static let csOpenProductionSetup = Notification.Name("CineSched.openProductionSetup")
     static let csScanForConflicts    = Notification.Name("CineSched.scanForConflicts")
+    static let csOpenBreakdownBrowser = Notification.Name("CineSched.openBreakdownBrowser")
+    static let csExportBreakdowns     = Notification.Name("CineSched.exportBreakdowns")
+    static let csLockSchedule         = Notification.Name("CineSched.lockSchedule")
+    static let csUnlockSchedule       = Notification.Name("CineSched.unlockSchedule")
+    static let csShowScheduleLockReport = Notification.Name("CineSched.showScheduleLockReport")
+    static let csUndo = Notification.Name("CineSched.undo")
+    static let csRedo = Notification.Name("CineSched.redo")
 }
 
 // MARK: - Recent files

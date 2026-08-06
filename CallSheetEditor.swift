@@ -31,6 +31,14 @@ struct CallSheetEditor: View {
 
     // Roster split: daily defaults first, then specialty
     private var dailyRoster:    [CrewMember] { productionInfo.crew.filter {  $0.isDailyDefault } }
+    /// Roster locations not already added to this day, so the picker doesn't clutter up
+    /// with duplicates once you've already added everywhere you're shooting today.
+    private var availableRosterLocations: [Location] {
+        let addedNames = Set(locations.map { $0.name.trimmingCharacters(in: .whitespaces).lowercased() })
+        return productionInfo.locationRoster.filter {
+            !addedNames.contains($0.name.trimmingCharacters(in: .whitespaces).lowercased())
+        }
+    }
     private var specialtyRoster: [CrewMember] { productionInfo.crew.filter { !$0.isDailyDefault } }
     private var allRosterEntries: [CrewMember] { dailyRoster + specialtyRoster }
 
@@ -131,10 +139,27 @@ struct CallSheetEditor: View {
                         .cornerRadius(8)
                         .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.blue.opacity(0.2), lineWidth: 1))
                     } else {
-                        Button { showingAddLocation = true } label: {
-                            Label("Add Location", systemImage: "plus.circle").font(.callout)
+                        HStack(spacing: 16) {
+                            Button { showingAddLocation = true } label: {
+                                Label("Add Location", systemImage: "plus.circle").font(.callout)
+                            }
+                            .buttonStyle(.plain).foregroundColor(.blue)
+
+                            if !availableRosterLocations.isEmpty {
+                                Menu {
+                                    ForEach(availableRosterLocations) { loc in
+                                        Button(loc.name.isEmpty ? "Unnamed Location" : loc.name) {
+                                            locations.append(loc)
+                                        }
+                                    }
+                                } label: {
+                                    Label("Choose from Roster", systemImage: "list.bullet")
+                                        .font(.callout)
+                                }
+                                .menuStyle(.borderlessButton)
+                                .fixedSize()
+                            }
                         }
-                        .buttonStyle(.plain).foregroundColor(.blue)
                     }
 
                     Divider()

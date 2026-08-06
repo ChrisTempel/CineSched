@@ -11,6 +11,7 @@ import SwiftUI
 struct CineSchedApp: App {
     @StateObject private var recentFiles = RecentFilesStore()
     @AppStorage("CineSchedDarkMode") private var isDarkMode: Bool = false
+    @AppStorage("CineSchedIncludeHoldInDOOD") private var includeHoldInDOOD: Bool = true
 
     var body: some SwiftUI.Scene {
         WindowGroup {
@@ -53,6 +54,19 @@ struct CineSchedApp: App {
                 }
             }
 
+            // Edit menu — Undo/Redo for structural schedule changes
+            CommandGroup(replacing: .undoRedo) {
+                Button("Undo") {
+                    NotificationCenter.default.post(name: .csUndo, object: nil)
+                }
+                .keyboardShortcut("z", modifiers: .command)
+
+                Button("Redo") {
+                    NotificationCenter.default.post(name: .csRedo, object: nil)
+                }
+                .keyboardShortcut("z", modifiers: [.command, .shift])
+            }
+
             // File menu — Save / Save As / Export
             CommandGroup(replacing: .saveItem) {
                 Button("Save") {
@@ -76,6 +90,10 @@ struct CineSchedApp: App {
                     NotificationCenter.default.post(name: .csExportDaysOutOfDays, object: nil)
                 }
                 .keyboardShortcut("e", modifiers: [.command, .shift])
+
+                Button("Export Scene Breakdowns…") {
+                    NotificationCenter.default.post(name: .csExportBreakdowns, object: nil)
+                }
             }
 
             // A home for the one action that doesn't fit File/Edit/View
@@ -89,6 +107,29 @@ struct CineSchedApp: App {
                     NotificationCenter.default.post(name: .csScanForConflicts, object: nil)
                 }
                 .keyboardShortcut("k", modifiers: [.command, .shift])
+
+                Divider()
+
+                Button("Breakdown Browser…") {
+                    NotificationCenter.default.post(name: .csOpenBreakdownBrowser, object: nil)
+                }
+                .keyboardShortcut("b", modifiers: [.command, .shift])
+
+                Divider()
+
+                Toggle("Include Hold Days in DOoD Report", isOn: $includeHoldInDOOD)
+
+                Divider()
+
+                Button("Lock Schedule") {
+                    NotificationCenter.default.post(name: .csLockSchedule, object: nil)
+                }
+                Button("Unlock Schedule") {
+                    NotificationCenter.default.post(name: .csUnlockSchedule, object: nil)
+                }
+                Button("Schedule Lock Report…") {
+                    NotificationCenter.default.post(name: .csShowScheduleLockReport, object: nil)
+                }
             }
 
             // View menu — Dark Mode, alongside the automatic Toggle Sidebar item

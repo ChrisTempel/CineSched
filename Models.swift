@@ -31,6 +31,17 @@ struct Scene: Identifiable, Codable, Hashable {
     var dayNightType: DayNightType
     var cast: [String]
     var summary: String
+    // Breakdown tagging — set via SceneEditSheet's Breakdown section or the Breakdown
+    // Browser, printed one page per scene via BreakdownExporter.
+    var extras: [String]
+    var props: [String]
+    var wardrobe: [String]
+    var vehicles: [String]
+    var specialEquipment: [String]
+    var stunts: [String]
+    var sfx: [String]
+    var vfx: [String]
+    var breakdownNotes: String
 
     init(
         title: String,
@@ -38,19 +49,38 @@ struct Scene: Identifiable, Codable, Hashable {
         estimatedTime: Int,
         dayNightType: DayNightType = .day,
         cast: [String] = [],
-        summary: String = ""
+        summary: String = "",
+        extras: [String] = [],
+        props: [String] = [],
+        wardrobe: [String] = [],
+        vehicles: [String] = [],
+        specialEquipment: [String] = [],
+        stunts: [String] = [],
+        sfx: [String] = [],
+        vfx: [String] = [],
+        breakdownNotes: String = ""
     ) {
-        self.id            = UUID()
-        self.title         = title
-        self.duration      = duration
-        self.estimatedTime = estimatedTime
-        self.dayNightType  = dayNightType
-        self.cast          = cast
-        self.summary       = summary
+        self.id               = UUID()
+        self.title            = title
+        self.duration         = duration
+        self.estimatedTime    = estimatedTime
+        self.dayNightType     = dayNightType
+        self.cast              = cast
+        self.summary           = summary
+        self.extras            = extras
+        self.props              = props
+        self.wardrobe           = wardrobe
+        self.vehicles           = vehicles
+        self.specialEquipment   = specialEquipment
+        self.stunts             = stunts
+        self.sfx                = sfx
+        self.vfx                = vfx
+        self.breakdownNotes     = breakdownNotes
     }
 
     enum CodingKeys: String, CodingKey {
         case id, title, duration, estimatedTime, dayNightType, cast, summary
+        case extras, props, wardrobe, vehicles, specialEquipment, stunts, sfx, vfx, breakdownNotes
     }
 
     init(from decoder: Decoder) throws {
@@ -70,6 +100,15 @@ struct Scene: Identifiable, Codable, Hashable {
         } else {
             cast = []
         }
+        extras           = try c.decodeIfPresent([String].self, forKey: .extras) ?? []
+        props            = try c.decodeIfPresent([String].self, forKey: .props) ?? []
+        wardrobe         = try c.decodeIfPresent([String].self, forKey: .wardrobe) ?? []
+        vehicles         = try c.decodeIfPresent([String].self, forKey: .vehicles) ?? []
+        specialEquipment = try c.decodeIfPresent([String].self, forKey: .specialEquipment) ?? []
+        stunts           = try c.decodeIfPresent([String].self, forKey: .stunts) ?? []
+        sfx              = try c.decodeIfPresent([String].self, forKey: .sfx) ?? []
+        vfx              = try c.decodeIfPresent([String].self, forKey: .vfx) ?? []
+        breakdownNotes   = try c.decodeIfPresent(String.self, forKey: .breakdownNotes) ?? ""
     }
 }
 
@@ -250,6 +289,28 @@ struct CastMember: Identifiable, Codable, Hashable {
     }
 }
 
+// MARK: - Scene script order
+
+extension Scene {
+    /// A numeric-aware sort key parsed from a leading scene number in the title (e.g.
+    /// "12A. INT. CABIN" → (12, "A")), so scenes sort in true script order — 12, 12A, 12B,
+    /// 13 — rather than plain alphabetical (which would put "12A" before "2"). Scenes with
+    /// no leading number sort after every numbered scene, alphabetically among themselves.
+    var scriptOrderKey: (Int, String) {
+        let trimmed = title.trimmingCharacters(in: .whitespaces)
+        let pattern = #"^(\d+)([A-Za-z]*)\."#
+        if let regex = try? NSRegularExpression(pattern: pattern),
+           let match = regex.firstMatch(in: trimmed, range: NSRange(trimmed.startIndex..., in: trimmed)),
+           let numRange = Range(match.range(at: 1), in: trimmed) {
+            let num = Int(trimmed[numRange]) ?? Int.max
+            let letterRange = Range(match.range(at: 2), in: trimmed)
+            let letter = letterRange.map { String(trimmed[$0]) } ?? ""
+            return (num, letter)
+        }
+        return (Int.max, trimmed)
+    }
+}
+
 // MARK: - Scene tooltip
 
 extension Scene {
@@ -277,20 +338,59 @@ struct ProductionInfo: Codable, Equatable {
     var contactNumber: String
     var crew:          [CrewMember]
     var castList:      [CastMember]
+    /// A reusable roster of locations, picked from when building a day's call sheet
+    /// instead of retyping the same address every time you shoot there again.
+    var locationRoster: [Location]
+    /// A snapshot of each character's working days at the moment the schedule was
+    /// locked — see ScheduleLockScanner for how this is used to flag changes. Nil means
+    /// no lock is currently set.
+    var scheduleLock: ScheduleLock?
 
     init(
         companyName:   String = "",
         directorName:  String = "",
         contactNumber: String = "",
         crew:          [CrewMember] = [],
-        castList:      [CastMember] = []
+        castList:      [CastMember] = [],
+        locationRoster: [Location] = [],
+        scheduleLock:  ScheduleLock? = nil
     ) {
         self.companyName   = companyName
         self.directorName  = directorName
         self.contactNumber = contactNumber
         self.crew          = crew
         self.castList      = castList
+        self.locationRoster = locationRoster
+        self.scheduleLock   = scheduleLock
     }
+
+    enum CodingKeys: String, CodingKey {
+        case companyName, directorName, contactNumber, crew, castList, locationRoster, scheduleLock
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        companyName    = try c.decode(String.self, forKey: .companyName)
+        directorName   = try c.decode(String.self, forKey: .directorName)
+        contactNumber  = try c.decode(String.self, forKey: .contactNumber)
+        crew           = try c.decode([CrewMember].self, forKey: .crew)
+        castList       = try c.decode([CastMember].self, forKey: .castList)
+        locationRoster = try c.decodeIfPresent([Location].self, forKey: .locationRoster) ?? []
+        scheduleLock   = try c.decodeIfPresent(ScheduleLock.self, forKey: .scheduleLock)
+    }
+}
+
+// MARK: - ScheduleLock
+
+/// A snapshot of which days each character was scheduled to work, captured when the
+/// schedule was locked. The schedule can still be freely rearranged after locking —
+/// nothing is blocked — this is purely a baseline to compare the current schedule
+/// against, so a change to an actor's working days can be flagged rather than silently
+/// slipping through.
+struct ScheduleLock: Codable, Equatable {
+    var lockedAt: Date
+    /// Character name -> the dates (start-of-day) they were scheduled to work at lock time.
+    var workingDays: [String: [Date]]
 }
 
 // MARK: - ShootDay
@@ -300,12 +400,31 @@ struct ShootDay: Identifiable, Codable {
     var date:      Date
     var scenes:    [Scene]       = []
     var callSheet: CallSheetData = CallSheetData()
+    /// A production-wide day off — a recurring non-shoot day (e.g. "we don't shoot
+    /// Saturdays") or a specific holiday. Scenes can still be scheduled here (used as
+    /// working space while rearranging the board); they're just flagged as a warning
+    /// rather than silently allowed, since it usually means something needs a second look.
+    var isBlackout: Bool = false
 
-    init(date: Date, scenes: [Scene] = [], callSheet: CallSheetData = CallSheetData()) {
-        self.id        = UUID()
-        self.date      = date
-        self.scenes    = scenes
-        self.callSheet = callSheet
+    init(date: Date, scenes: [Scene] = [], callSheet: CallSheetData = CallSheetData(), isBlackout: Bool = false) {
+        self.id         = UUID()
+        self.date       = date
+        self.scenes     = scenes
+        self.callSheet  = callSheet
+        self.isBlackout = isBlackout
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case id, date, scenes, callSheet, isBlackout
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id         = try c.decode(UUID.self, forKey: .id)
+        date       = try c.decode(Date.self, forKey: .date)
+        scenes     = try c.decode([Scene].self, forKey: .scenes)
+        callSheet  = try c.decode(CallSheetData.self, forKey: .callSheet)
+        isBlackout = try c.decodeIfPresent(Bool.self, forKey: .isBlackout) ?? false
     }
 
     var totalDuration:      Int { scenes.reduce(0) { $0 + $1.duration } }

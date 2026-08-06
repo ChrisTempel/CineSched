@@ -20,7 +20,12 @@ struct CompactMonthCalendarView: View {
     @Binding var lastSelectedSceneID: UUID?
     let conflictDates: Set<Date>
     let conflictSceneIDs: Set<UUID>
+    let scheduleLockChangedDates: Set<Date>
     @Binding var scrollToDate: Date?
+    /// Called immediately before a structural mutation (drag/drop, remove, duplicate,
+    /// send-to-day, day rearrange) — lets the caller snapshot state for undo purposes
+    /// before the change happens.
+    let onBeforeSceneChange: () -> Void
     let onSceneChanged: () -> Void
     let onCallSheetExport: (ShootDay) -> Void   // called when Export PDF tapped in editor
 
@@ -128,7 +133,14 @@ struct CompactMonthCalendarView: View {
                 } label: {
                     HStack(spacing: 4) {
                         Text(formattedDate(day.date))
-                            .font(.caption).bold().foregroundColor(.primary)
+                            .font(.caption).bold()
+                            .foregroundColor(day.isBlackout ? .red : .primary)
+                        if day.isBlackout {
+                            Image(systemName: "nosign")
+                                .font(.system(size: 8))
+                                .foregroundColor(.red)
+                                .help("Marked unavailable — scenes can still be scheduled here, but will be flagged")
+                        }
                         if day.hasCallSheetData {
                             Circle()
                                 .fill(Color.blue)
@@ -140,6 +152,12 @@ struct CompactMonthCalendarView: View {
                                 .foregroundColor(.red)
                                 .help("An actor scheduled this day is marked unavailable — see Production > Scan for Conflicts…")
                         }
+                        if scheduleLockChangedDates.contains(Calendar.current.startOfDay(for: day.date)) {
+                            Image(systemName: "lock.trianglebadge.exclamationmark.fill")
+                                .font(.system(size: 8))
+                                .foregroundColor(.purple)
+                                .help("An actor's working days changed here since the schedule was locked — see Production > Schedule Lock Report…")
+                        }
                         Spacer()
                         Image(systemName: "doc.text")
                             .font(.system(size: 8))
@@ -148,6 +166,16 @@ struct CompactMonthCalendarView: View {
                 }
                 .buttonStyle(.plain)
                 .help("Click to open call sheet for this day")
+                .contextMenu {
+                    Button(day.isBlackout ? "Mark as Available" : "Mark as Unavailable") {
+                        toggleBlackout(day)
+                    }
+                    Button(day.isBlackout
+                           ? "Mark All \(weekdayName(for: day.date))s as Available"
+                           : "Mark All \(weekdayName(for: day.date))s as Unavailable") {
+                        toggleBlackoutForWeekday(day)
+                    }
+                }
             }
 
             VStack(spacing: 2) {
@@ -166,13 +194,15 @@ struct CompactMonthCalendarView: View {
                             selectionCount: selectedSceneIDs.count,
                             showCast: isSidebarCollapsed,
                             hasConflict: conflictSceneIDs.contains(scene.id),
+                            isOnBlackoutDay: day.isBlackout,
                             onEdit:      { editScene(dayIndex: dayIndex, sceneIndex: sceneIndex, scene: scene, dayId: day.id) },
                             onRemove:    { removeFromDay(scene, dayId: day.id) },
                             onDuplicate: { duplicateScene(scene) },
                             onDragStart: { draggedSceneId = scene.id },
                             onDragEnd:   { draggedSceneId = nil },
                             onSelect:    { selectScene(scene, dayId: day.id) },
-                            onSendToDay: { beginSendToDay(scene) }
+                            onSendToDay: { beginSendToDay(scene) },
+                            dragPayload: { dragPayload(for: scene) }
                         )
                     }
                     .onDrop(of: [UTType.text.identifier], delegate: SceneDropDelegate(
@@ -194,24 +224,26 @@ struct CompactMonthCalendarView: View {
             if !day.scenes.isEmpty {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Total: \(formattedEighths(day.totalDuration))")
-                        .font(.caption2).foregroundColor(.gray)
+                        .font(.caption2).fontWeight(.medium).foregroundColor(.secondary)
                     Text("Est: \(formattedTime(day.totalEstimatedTime))")
-                        .font(.caption2).foregroundColor(.gray)
+                        .font(.caption2).fontWeight(.medium).foregroundColor(.secondary)
                 }
             }
         }
         .padding(6)
         .frame(maxWidth: .infinity, minHeight: 120, alignment: .topLeading)
-        .background(Color.gray.opacity(0.2))
+        .background(day.isBlackout ? Color.red.opacity(0.16) : Color.gray.opacity(0.32))
         .overlay(
             RoundedRectangle(cornerRadius: 8)
                 .stroke(
                     dayDropTargetId == day.id ? Color.green :
-                    dropTargetDayId == day.id ? Color.red : Color.black,
-                    lineWidth: (dayDropTargetId == day.id || dropTargetDayId == day.id) ? 2 : 1
+                    dropTargetDayId == day.id ? Color.red :
+                    day.isBlackout ? Color.red.opacity(0.5) : Color.primary.opacity(0.3),
+                    lineWidth: (dayDropTargetId == day.id || dropTargetDayId == day.id) ? 2.5 : (day.isBlackout ? 2 : 1.5)
                 )
         )
         .cornerRadius(8)
+        .shadow(color: .black.opacity(0.18), radius: 2, x: 0, y: 1)
         .onDrop(of: [UTType.text.identifier], delegate: CombinedDayDropDelegate(
             dayId: day.id,
             scenes: day.scenes,
@@ -267,6 +299,7 @@ struct CompactMonthCalendarView: View {
                     onSceneChanged()
                 },
                 onDelete: {
+                    onBeforeSceneChange()
                     if let id = editingDayId {
                         removeScene(shootDays[dayIndex].scenes[sceneIndex], id)
                         onSceneChanged()
@@ -307,6 +340,7 @@ struct CompactMonthCalendarView: View {
     private func handleSceneDrop(sceneId: String, targetDayId: UUID, targetPosition: Int) {
         let ids = sceneId.components(separatedBy: ",").compactMap { UUID(uuidString: $0) }
         guard !ids.isEmpty else { return }
+        onBeforeSceneChange()
 
         var insertPosition = targetPosition
         for uuid in ids {
@@ -369,6 +403,7 @@ struct CompactMonthCalendarView: View {
     /// a multi-scene selection, every selected scene that's currently scheduled anywhere on
     /// the calendar, mirroring the grouping behavior of "Send to Day".
     private func removeFromDay(_ scene: Scene, dayId: UUID) {
+        onBeforeSceneChange()
         if selectedSceneIDs.contains(scene.id), selectedSceneIDs.count > 1 {
             for dayIdx in shootDays.indices {
                 let matching = shootDays[dayIdx].scenes.filter { selectedSceneIDs.contains($0.id) }
@@ -382,23 +417,64 @@ struct CompactMonthCalendarView: View {
         onSceneChanged()
     }
 
+    // MARK: - Blackout days
+
+    private func weekdayName(for date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "EEEE"
+        return formatter.string(from: date)
+    }
+
+    private func toggleBlackout(_ day: ShootDay) {
+        guard let idx = shootDays.firstIndex(where: { $0.id == day.id }) else { return }
+        onBeforeSceneChange()
+        shootDays[idx].isBlackout.toggle()
+        onSceneChanged()
+    }
+
+    /// Toggles every day sharing this date's weekday to match — e.g. "we don't shoot
+    /// Saturdays" in one action instead of right-clicking each Saturday individually.
+    private func toggleBlackoutForWeekday(_ day: ShootDay) {
+        let cal = Calendar.current
+        let weekday = cal.component(.weekday, from: day.date)
+        let newValue = !day.isBlackout
+        onBeforeSceneChange()
+        for idx in shootDays.indices where cal.component(.weekday, from: shootDays[idx].date) == weekday {
+            shootDays[idx].isBlackout = newValue
+        }
+        onSceneChanged()
+    }
+
     // MARK: - Send to Day
 
     /// Right-clicking a scene that's part of the current multi-selection sends the whole
     /// selection; right-clicking a scene outside the selection sends just that one, mirroring
     /// the same "act on the selection, or act on what you clicked" rule the Boneyard drag uses.
-    private func beginSendToDay(_ scene: Scene) {
-        if selectedSceneIDs.contains(scene.id), selectedSceneIDs.count > 1 {
-            // Selection is shared with the Boneyard, so a right-click here could be acting on
-            // a mix of scheduled and unscheduled scenes. Order scheduled ones by their existing
-            // calendar position, then append any still-unscheduled selected ones from the
-            // Boneyard, rather than relying on Set's arbitrary iteration order.
-            let scheduledOrdered = shootDays.flatMap { $0.scenes.map(\.id) }.filter { selectedSceneIDs.contains($0) }
-            let boneyardOrdered  = allScenes.map(\.id).filter { selectedSceneIDs.contains($0) }
-            sendToDaySceneIDs = scheduledOrdered + boneyardOrdered
-        } else {
-            sendToDaySceneIDs = [scene.id]
+    /// Every currently selected scene ID, ordered sensibly — scheduled ones by their
+    /// existing calendar position, then any still-unscheduled selected ones from the
+    /// Boneyard — or just [scene.id] if scene isn't part of a multi-selection. Shared by
+    /// both Send to Day and dragging a multi-selected scene, so both move a selection in
+    /// the same order rather than Set's arbitrary iteration order.
+    private func orderedSelectionIDs(for scene: Scene) -> [UUID] {
+        guard selectedSceneIDs.contains(scene.id), selectedSceneIDs.count > 1 else { return [scene.id] }
+        let scheduledOrdered = shootDays.flatMap { $0.scenes.map(\.id) }.filter { selectedSceneIDs.contains($0) }
+        let boneyardOrdered  = allScenes.map(\.id).filter { selectedSceneIDs.contains($0) }
+        return scheduledOrdered + boneyardOrdered
+    }
+
+    /// Comma-separated drag payload for a scene card — the whole selection if it's part of
+    /// a multi-selection, otherwise just itself. handleSceneDrop already accepts either a
+    /// single ID or a comma-separated list, so no change was needed on the drop side.
+    private func dragPayload(for scene: Scene) -> String {
+        if !(selectedSceneIDs.contains(scene.id) && selectedSceneIDs.count > 1) {
+            selectedSceneIDs = [scene.id]
+            lastSelectedSceneID = scene.id
         }
+        return orderedSelectionIDs(for: scene).map(\.uuidString).joined(separator: ",")
+    }
+
+    private func beginSendToDay(_ scene: Scene) {
+        sendToDaySceneIDs = orderedSelectionIDs(for: scene)
         showingSendToDaySheet = true
     }
 
@@ -406,6 +482,7 @@ struct CompactMonthCalendarView: View {
     /// preserving the order they're passed in, and clears them from the selection afterward.
     private func sendScenes(_ ids: [UUID], toDay targetDayId: UUID) {
         guard let targetIdx = shootDays.firstIndex(where: { $0.id == targetDayId }) else { return }
+        onBeforeSceneChange()
         var insertPosition = shootDays[targetIdx].scenes.count
 
         for uuid in ids {
@@ -430,13 +507,23 @@ struct CompactMonthCalendarView: View {
     }
 
     private func duplicateScene(_ scene: Scene) {
+        onBeforeSceneChange()
         allScenes.append(Scene(
             title: scene.title + " (Copy)",
             duration: scene.duration,
             estimatedTime: scene.estimatedTime,
             dayNightType: scene.dayNightType,
             cast: scene.cast,
-            summary: scene.summary
+            summary: scene.summary,
+            extras: scene.extras,
+            props: scene.props,
+            wardrobe: scene.wardrobe,
+            vehicles: scene.vehicles,
+            specialEquipment: scene.specialEquipment,
+            stunts: scene.stunts,
+            sfx: scene.sfx,
+            vfx: scene.vfx,
+            breakdownNotes: scene.breakdownNotes
         ))
         onSceneChanged()
     }
@@ -468,6 +555,7 @@ struct CompactMonthCalendarView: View {
               let sourceIdx = shootDays.firstIndex(where: { $0.id == sourceDayId }),
               let targetIdx = shootDays.firstIndex(where: { $0.id == targetDayId })
         else { return }
+        onBeforeSceneChange()
 
         // Swap scenes and call sheet, preserving both dates
         let sourceScenes    = shootDays[sourceIdx].scenes
@@ -498,6 +586,7 @@ struct SceneCardView: View {
     let selectionCount: Int
     let showCast:       Bool
     let hasConflict:    Bool
+    let isOnBlackoutDay: Bool
     let onEdit:      () -> Void
     let onRemove:    () -> Void
     let onDuplicate: () -> Void
@@ -505,13 +594,15 @@ struct SceneCardView: View {
     let onDragEnd:   () -> Void
     let onSelect:    () -> Void
     let onSendToDay: () -> Void
+    let dragPayload: () -> String
 
     private var isDragging: Bool { interactingSceneId == scene.id }
     private var isMultiSelected: Bool { isSelected && selectionCount > 1 }
     /// A conflict (this scene's cast includes someone marked unavailable that day) takes
     /// visual priority over the normal Day/Night/Custom color — it's the more urgent thing
     /// to notice at a glance.
-    private var displayColor: Color { hasConflict ? .red : scene.dayNightType.color }
+    private var isFlagged: Bool { hasConflict || isOnBlackoutDay }
+    private var displayColor: Color { isFlagged ? .red : scene.dayNightType.color }
 
     var body: some View {
         HStack(alignment: .top, spacing: 4) {
@@ -528,6 +619,13 @@ struct SceneCardView: View {
                         Image(systemName: "exclamationmark.triangle.fill")
                             .font(.system(size: 7))
                             .foregroundColor(.red)
+                            .help("An actor in this scene is marked unavailable this day")
+                    }
+                    if isOnBlackoutDay {
+                        Image(systemName: "nosign")
+                            .font(.system(size: 7))
+                            .foregroundColor(.red)
+                            .help("Scheduled on a day marked unavailable")
                     }
                 }
 
@@ -550,12 +648,12 @@ struct SceneCardView: View {
         .padding(4)
         .background(
             RoundedRectangle(cornerRadius: 4)
-                .fill(displayColor.opacity(isDragging ? 0.3 : (hasConflict ? 0.22 : 0.15)))
+                .fill(displayColor.opacity(isDragging ? 0.3 : (isFlagged ? 0.22 : 0.15)))
                 .overlay(
                     RoundedRectangle(cornerRadius: 4)
                         .stroke(
-                            isSelected ? Color.accentColor : displayColor.opacity(isDragging ? 0.8 : (hasConflict ? 0.9 : 0.4)),
-                            lineWidth: isSelected ? 2 : (isDragging || hasConflict ? 2 : 1)
+                            isSelected ? Color.accentColor : displayColor.opacity(isDragging ? 0.8 : (isFlagged ? 0.9 : 0.4)),
+                            lineWidth: isSelected ? 2 : (isDragging || isFlagged ? 2 : 1)
                         )
                 )
         )
@@ -566,7 +664,7 @@ struct SceneCardView: View {
         .onDrag {
             interactingSceneId = scene.id
             onDragStart()
-            return NSItemProvider(object: scene.id.uuidString as NSString)
+            return NSItemProvider(object: dragPayload() as NSString)
         } preview: {
             HStack(spacing: 4) {
                 Circle().fill(scene.dayNightType.color).frame(width: 8, height: 8)

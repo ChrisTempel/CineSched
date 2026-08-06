@@ -16,6 +16,15 @@ struct SceneEditSheet: View {
     var onPrevious:    (() -> Void)? = nil
     var onNext:        (() -> Void)? = nil
     var positionLabel: String?       = nil
+    /// The Breakdown section starts collapsed in normal scene editing (keeps a quick
+    /// duration/cast tweak fast), but the Breakdown Browser opens it expanded since
+    /// tagging is the whole point of that mode.
+    var breakdownExpandedByDefault: Bool = false
+    /// Whether Delete Scene closes the sheet afterward. True everywhere this sheet is
+    /// normally used (deleting a single scene you were editing should close it) — false
+    /// for the Breakdown Browser, where closing on every delete would kick you out of a
+    /// script you might be halfway through tagging, forcing a restart from scene one.
+    var closeAfterDelete: Bool = true
 
     @State private var editTitle:         String      = ""
     @State private var editDuration:      String      = ""
@@ -23,6 +32,17 @@ struct SceneEditSheet: View {
     @State private var editDayNightType:  DayNightType = .day
     @State private var editCastText:      String      = ""   // comma-separated editing surface
     @State private var editSummary:       String      = ""
+
+    @State private var breakdownExpanded:      Bool   = false
+    @State private var editExtras:             String = ""
+    @State private var editProps:              String = ""
+    @State private var editWardrobe:           String = ""
+    @State private var editVehicles:           String = ""
+    @State private var editSpecialEquipment:   String = ""
+    @State private var editStunts:             String = ""
+    @State private var editSFX:                String = ""
+    @State private var editVFX:                String = ""
+    @State private var editBreakdownNotes:     String = ""
 
     @State private var durationIsValid:      Bool = true
     @State private var estimatedTimeIsValid: Bool = true
@@ -71,7 +91,8 @@ struct SceneEditSheet: View {
                 .opacity(onNext == nil ? 0 : 1)
             }
 
-            VStack(alignment: .leading, spacing: 12) {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 12) {
 
                 // Title
                 Text("Scene Title").font(.headline)
@@ -170,12 +191,42 @@ struct SceneEditSheet: View {
                         }
                     }
                 }
+
+                Divider()
+
+                // Breakdown tagging
+                DisclosureGroup(isExpanded: $breakdownExpanded) {
+                    VStack(alignment: .leading, spacing: 12) {
+                        breakdownField("Extras / Background", text: $editExtras)
+                        breakdownField("Props", text: $editProps)
+                        breakdownField("Wardrobe", text: $editWardrobe)
+                        breakdownField("Vehicles", text: $editVehicles)
+                        breakdownField("Special Equipment", text: $editSpecialEquipment)
+                        breakdownField("Stunts", text: $editStunts)
+                        breakdownField("SFX", text: $editSFX)
+                        breakdownField("VFX", text: $editVFX)
+
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("Breakdown Notes").font(.subheadline).foregroundColor(.secondary)
+                            TextEditor(text: $editBreakdownNotes)
+                                .frame(minHeight: 60)
+                                .padding(6)
+                                .border(Color.gray.opacity(0.3), width: 1)
+                                .cornerRadius(4)
+                        }
+                    }
+                    .padding(.top, 8)
+                } label: {
+                    Text("Breakdown").font(.headline)
+                }
+                }
             }
+            .frame(maxHeight: 480)
 
             HStack(spacing: 16) {
                 Button("Delete Scene") {
                     onDelete()
-                    isPresented = false
+                    if closeAfterDelete { isPresented = false }
                 }
                 .foregroundColor(.red)
                 .buttonStyle(.bordered)
@@ -199,10 +250,12 @@ struct SceneEditSheet: View {
         .onAppear {
             populateFields()
             focusDurationField()
+            breakdownExpanded = breakdownExpandedByDefault
         }
         .onChange(of: scene.id) {
             populateFields()
             focusDurationField()
+            breakdownExpanded = breakdownExpandedByDefault
         }
     }
 
@@ -236,6 +289,15 @@ struct SceneEditSheet: View {
         editDayNightType  = scene.dayNightType
         editCastText      = scene.cast.joined(separator: ", ")
         editSummary       = scene.summary
+        editExtras           = scene.extras.joined(separator: ", ")
+        editProps            = scene.props.joined(separator: ", ")
+        editWardrobe         = scene.wardrobe.joined(separator: ", ")
+        editVehicles         = scene.vehicles.joined(separator: ", ")
+        editSpecialEquipment = scene.specialEquipment.joined(separator: ", ")
+        editStunts           = scene.stunts.joined(separator: ", ")
+        editSFX              = scene.sfx.joined(separator: ", ")
+        editVFX              = scene.vfx.joined(separator: ", ")
+        editBreakdownNotes   = scene.breakdownNotes
         validateDuration()
         validateEstimatedTime()
     }
@@ -280,5 +342,29 @@ struct SceneEditSheet: View {
         else if editDayNightType == .custom                     { scene.duration      = 0 }
         if let t = TimeParser.parseToMinutes(editEstimatedTime) { scene.estimatedTime = t }
         else if editDayNightType == .custom                     { scene.estimatedTime = 0 }
+
+        scene.extras           = parseCommaList(editExtras)
+        scene.props            = parseCommaList(editProps)
+        scene.wardrobe         = parseCommaList(editWardrobe)
+        scene.vehicles         = parseCommaList(editVehicles)
+        scene.specialEquipment = parseCommaList(editSpecialEquipment)
+        scene.stunts           = parseCommaList(editStunts)
+        scene.sfx              = parseCommaList(editSFX)
+        scene.vfx               = parseCommaList(editVFX)
+        scene.breakdownNotes    = editBreakdownNotes
+    }
+
+    private func parseCommaList(_ text: String) -> [String] {
+        text.components(separatedBy: ",")
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }
+    }
+
+    @ViewBuilder
+    private func breakdownField(_ label: String, text: Binding<String>) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(label).font(.subheadline).foregroundColor(.secondary)
+            TextField("Comma-separated", text: text).textFieldStyle(RoundedBorderTextFieldStyle())
+        }
     }
 }

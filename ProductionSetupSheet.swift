@@ -17,6 +17,7 @@ struct ProductionSetupSheet: View {
     @State private var contactNumber: String = ""
     @State private var castList:      [CastMember] = []
     @State private var crew:          [CrewMember] = []
+    @State private var locationRoster: [Location] = []
 
     @State private var newActorName:          String = ""
     @State private var availabilityEditorIndex: Int? = nil
@@ -24,6 +25,8 @@ struct ProductionSetupSheet: View {
     @State private var newCrewName:           String = ""
     @State private var newCrewRole:           String = ""
     @State private var newCrewIsDailyDefault: Bool   = false
+    @State private var newLocationName:    String = ""
+    @State private var newLocationAddress: String = ""
 
     var body: some View {
         VStack(spacing: 0) {
@@ -223,6 +226,58 @@ struct ProductionSetupSheet: View {
                         .buttonStyle(.plain)
                         .disabled(newCrewName.trimmingCharacters(in: .whitespaces).isEmpty)
                     }
+
+                    Divider()
+
+                    // Location roster
+                    Label("Locations", systemImage: "mappin.and.ellipse").font(.headline)
+                    Text("Locations added here can be picked directly when building a day's call sheet, instead of retyping the address every time you shoot there again.")
+                        .font(.caption).foregroundColor(.secondary)
+
+                    if locationRoster.isEmpty {
+                        Text("No locations added yet.").font(.caption).foregroundColor(.secondary)
+                    } else {
+                        ForEach(Array(locationRoster.enumerated()), id: \.element.id) { index, loc in
+                            HStack(spacing: 8) {
+                                TextField("Location name", text: Binding(
+                                    get: { locationRoster[index].name },
+                                    set: { locationRoster[index].name = $0 }
+                                ))
+                                .textFieldStyle(RoundedBorderTextFieldStyle())
+
+                                TextField("Address (optional)", text: Binding(
+                                    get: { locationRoster[index].address },
+                                    set: { locationRoster[index].address = $0 }
+                                ))
+                                .textFieldStyle(RoundedBorderTextFieldStyle())
+
+                                Button { locationRoster.remove(at: index) } label: {
+                                    Image(systemName: "minus.circle").foregroundColor(.red)
+                                }
+                                .buttonStyle(.plain)
+                            }
+                            .padding(8)
+                            .background(Color.gray.opacity(0.08))
+                            .cornerRadius(6)
+                        }
+                    }
+
+                    HStack(spacing: 8) {
+                        TextField("Name", text: $newLocationName)
+                            .textFieldStyle(RoundedBorderTextFieldStyle())
+                        TextField("Address (optional)", text: $newLocationAddress)
+                            .textFieldStyle(RoundedBorderTextFieldStyle())
+                        Button {
+                            let name = newLocationName.trimmingCharacters(in: .whitespaces)
+                            guard !name.isEmpty else { return }
+                            locationRoster.append(Location(name: name, address: newLocationAddress.trimmingCharacters(in: .whitespaces)))
+                            newLocationName = ""; newLocationAddress = ""
+                        } label: {
+                            Image(systemName: "plus.circle.fill").foregroundColor(.blue).font(.title3)
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(newLocationName.trimmingCharacters(in: .whitespaces).isEmpty)
+                    }
                 }
                 .padding(24)
             }
@@ -251,6 +306,7 @@ struct ProductionSetupSheet: View {
                     productionInfo.contactNumber = contactNumber
                     productionInfo.castList      = castList
                     productionInfo.crew          = crew
+                    productionInfo.locationRoster = locationRoster
                     onSave()
                     isPresented = false
                 }
@@ -265,6 +321,7 @@ struct ProductionSetupSheet: View {
             contactNumber = productionInfo.contactNumber
             castList      = productionInfo.castList
             crew          = productionInfo.crew
+            locationRoster = productionInfo.locationRoster
         }
     }
 }

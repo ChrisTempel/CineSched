@@ -7,7 +7,7 @@ import SwiftUI
 import AppKit
 
 enum DOODStatus: Equatable {
-    case startWork, work, hold, finish, startFinish, none
+    case startWork, work, hold, finish, startFinish, unavailable, none
 
     var code: String {
         switch self {
@@ -16,6 +16,7 @@ enum DOODStatus: Equatable {
         case .hold:        return "H"
         case .finish:      return "WF"
         case .startFinish: return "SWF"
+        case .unavailable: return "X"
         case .none:        return ""
         }
     }
@@ -23,7 +24,7 @@ enum DOODStatus: Equatable {
     var isWorkDay: Bool {
         switch self {
         case .startWork, .work, .finish, .startFinish: return true
-        case .hold, .none: return false
+        case .hold, .unavailable, .none: return false
         }
     }
 
@@ -32,6 +33,7 @@ enum DOODStatus: Equatable {
         case .startWork, .finish, .startFinish: return .white
         case .work:  return .black
         case .hold:  return NSColor(calibratedWhite: 0.35, alpha: 1)
+        case .unavailable: return .white
         case .none:  return .clear
         }
     }
@@ -41,6 +43,7 @@ enum DOODStatus: Equatable {
         case .startWork, .finish, .startFinish: return NSColor.systemBlue
         case .work:  return NSColor(calibratedWhite: 0.94, alpha: 1)
         case .hold:  return NSColor.systemYellow.withAlphaComponent(0.35)
+        case .unavailable: return NSColor.systemRed.withAlphaComponent(0.55)
         case .none:  return .clear
         }
     }
@@ -59,7 +62,7 @@ struct DaysOutOfDaysExporter {
     /// Builds one row per character that's actually scheduled anywhere in the project.
     /// Characters from Production Setup's cast list come first (in that order), followed
     /// by any character names found only in scene cast lists (e.g. background/unlisted).
-    static func buildRows(shootDays: [ShootDay], productionInfo: ProductionInfo) -> (days: [ShootDay], rows: [DOODRow]) {
+    static func buildRows(shootDays: [ShootDay], productionInfo: ProductionInfo, includeHold: Bool = true) -> (days: [ShootDay], rows: [DOODRow]) {
         let sortedDays = shootDays.sorted { $0.date < $1.date }
 
         var seen: Set<String> = []
@@ -102,26 +105,40 @@ struct DaysOutOfDaysExporter {
                     for idx in (firstIdx + 1)..<lastIdx {
                         if workDayIndices.contains(idx) {
                             statuses[idx] = .work
-                        } else if !sortedDays[idx].scenes.isEmpty {
+                        } else if includeHold && !sortedDays[idx].scenes.isEmpty {
                             // A shoot day where *other* people are working, but not this
                             // character — a true hold. A production-wide day off (no
                             // scenes scheduled for anyone) is left blank instead, since
-                            // that's not specific to this cast member.
+                            // that's not specific to this cast member. Left blank entirely
+                            // when includeHold is off — some productions only pay actors
+                            // for days actually on set, so Hold isn't meaningful to them.
                             statuses[idx] = .hold
                         }
                     }
                 }
             }
 
-            let displayName: String = {
-                if let match = productionInfo.castList.first(where: {
-                    $0.characterName.trimmingCharacters(in: .whitespaces)
-                        .caseInsensitiveCompare(character) == .orderedSame
-                }) {
-                    return match.displayString
+            let matchedMember = productionInfo.castList.first {
+                $0.characterName.trimmingCharacters(in: .whitespaces)
+                    .caseInsensitiveCompare(character) == .orderedSame
+            }
+
+            // Mark actor-specific unavailable dates — overriding Hold (an unavailable date
+            // almost always falls within an actor's existing Hold span, which is exactly
+            // why this needs to override it rather than only filling blank cells) but
+            // never overriding an actual work day: if they're scheduled to work despite
+            // being marked unavailable, that's a genuine conflict already flagged via the
+            // calendar's red strips and Scan for Conflicts — the DOOD should keep showing
+            // they're actually working that day, not hide it behind an availability flag.
+            if let ranges = matchedMember?.unavailableRanges, !ranges.isEmpty {
+                for idx in statuses.indices where statuses[idx] == .none || statuses[idx] == .hold {
+                    if ranges.contains(where: { $0.contains(sortedDays[idx].date) }) {
+                        statuses[idx] = .unavailable
+                    }
                 }
-                return character
-            }()
+            }
+
+            let displayName = matchedMember?.displayString ?? character
 
             rows.append(DOODRow(
                 displayName: displayName,
@@ -134,8 +151,8 @@ struct DaysOutOfDaysExporter {
         return (sortedDays, rows)
     }
 
-    static func generatePDF(shootDays: [ShootDay], projectTitle: String, productionInfo: ProductionInfo) -> Data? {
-        let (days, rows) = buildRows(shootDays: shootDays, productionInfo: productionInfo)
+    static func generatePDF(shootDays: [ShootDay], projectTitle: String, productionInfo: ProductionInfo, includeHold: Bool = true) -> Data? {
+        let (days, rows) = buildRows(shootDays: shootDays, productionInfo: productionInfo, includeHold: includeHold)
         guard !days.isEmpty, !rows.isEmpty else { return nil }
 
         let pageWidth:  CGFloat = 792   // US Letter landscape
@@ -149,9 +166,10 @@ struct DaysOutOfDaysExporter {
         let headerHeight:    CGFloat = 30
         let titleHeight:     CGFloat = 34
         let legendHeight:    CGFloat = 20
+        let summaryLabels = includeHold ? ["TOT", "WRK", "HLD"] : ["TOT", "WRK"]
 
         let contentWidth  = pageWidth - 2 * margin
-        let fixedColsWidth = nameColWidth + summaryColWidth * 3
+        let fixedColsWidth = nameColWidth + summaryColWidth * CGFloat(summaryLabels.count)
         let daysAvailableWidth = contentWidth - fixedColsWidth
         let daysPerPage = max(1, Int(daysAvailableWidth / dayColWidth))
         let rowsPerPage = max(1, Int((pageHeight - 2 * margin - titleHeight - headerHeight - legendHeight) / rowHeight))
@@ -203,7 +221,7 @@ struct DaysOutOfDaysExporter {
                 drawCell("", rect: CGRect(x: x, y: y - headerHeight, width: nameColWidth, height: headerHeight),
                           font: .boldSystemFont(ofSize: 9), align: .left, textColor: .black, fill: nil)
                 x += nameColWidth
-                for label in ["TOT", "WRK", "HLD"] {
+                for label in summaryLabels {
                     drawCell(label, rect: CGRect(x: x, y: y - headerHeight, width: summaryColWidth, height: headerHeight),
                              font: .boldSystemFont(ofSize: 8), align: .center, textColor: .black, fill: nil)
                     x += summaryColWidth
@@ -216,7 +234,7 @@ struct DaysOutOfDaysExporter {
                     lastMonth = month
                     let headerText = "\(monthLabel)\n\(weekdayFormatter.string(from: day.date))\n\(dayNumFormatter.string(from: day.date))"
                     drawMultilineHeader(headerText, rect: CGRect(x: x, y: y - headerHeight, width: dayColWidth, height: headerHeight),
-                                        isOff: day.scenes.isEmpty)
+                                        isOff: day.isBlackout)
                     x += dayColWidth
                 }
                 y -= headerHeight
@@ -235,9 +253,11 @@ struct DaysOutOfDaysExporter {
                     drawCell("\(row.workDayCount)", rect: CGRect(x: rx, y: y - rowHeight, width: summaryColWidth, height: rowHeight),
                              font: .systemFont(ofSize: 9), align: .center, textColor: .black, fill: nil)
                     rx += summaryColWidth
-                    drawCell("\(row.holdDayCount)", rect: CGRect(x: rx, y: y - rowHeight, width: summaryColWidth, height: rowHeight),
-                             font: .systemFont(ofSize: 9), align: .center, textColor: .black, fill: nil)
-                    rx += summaryColWidth
+                    if includeHold {
+                        drawCell("\(row.holdDayCount)", rect: CGRect(x: rx, y: y - rowHeight, width: summaryColWidth, height: rowHeight),
+                                 font: .systemFont(ofSize: 9), align: .center, textColor: .black, fill: nil)
+                        rx += summaryColWidth
+                    }
 
                     for i in dayStart..<(dayStart + dayChunk.count) {
                         let status = row.statuses[i]
@@ -251,12 +271,14 @@ struct DaysOutOfDaysExporter {
 
                 // Grid lines
                 drawGrid(top: gridTop, headerBottom: gridBottom0, bottom: gridBottom,
-                         left: margin, nameColWidth: nameColWidth, summaryColWidth: summaryColWidth,
+                         left: margin, nameColWidth: nameColWidth, summaryColWidth: summaryColWidth, summaryColCount: summaryLabels.count,
                          dayColWidth: dayColWidth, dayCount: dayChunk.count, rowCount: rowChunk.count, rowHeight: rowHeight)
 
                 // Legend (every page, since pages can be viewed independently)
                 let legendY = margin - 4
-                let legendText = "SW = Start Work    W = Work    H = Hold    WF = Work Finish    SWF = Start/Work/Finish    TOT = Total Days    WRK = Work Days    HLD = Hold Days"
+                let legendText = includeHold
+                    ? "SW = Start Work    W = Work    H = Hold    WF = Work Finish    SWF = Start/Work/Finish    X = Unavailable    TOT = Total Days    WRK = Work Days    HLD = Hold Days"
+                    : "SW = Start Work    W = Work    WF = Work Finish    SWF = Start/Work/Finish    X = Unavailable    TOT = Total Days    WRK = Work Days"
                 NSAttributedString(string: legendText, attributes: [
                     .font: NSFont.systemFont(ofSize: 8), .foregroundColor: NSColor.gray
                 ]).draw(at: CGPoint(x: margin, y: legendY))
@@ -305,14 +327,14 @@ struct DaysOutOfDaysExporter {
 
     private static func drawGrid(
         top: CGFloat, headerBottom: CGFloat, bottom: CGFloat,
-        left: CGFloat, nameColWidth: CGFloat, summaryColWidth: CGFloat,
+        left: CGFloat, nameColWidth: CGFloat, summaryColWidth: CGFloat, summaryColCount: Int,
         dayColWidth: CGFloat, dayCount: Int, rowCount: Int, rowHeight: CGFloat
     ) {
         let path = NSBezierPath()
         path.lineWidth = 0.4
         NSColor.lightGray.setStroke()
 
-        let right = left + nameColWidth + summaryColWidth * 3 + dayColWidth * CGFloat(dayCount)
+        let right = left + nameColWidth + summaryColWidth * CGFloat(summaryColCount) + dayColWidth * CGFloat(dayCount)
 
         // Header underline + outer box
         path.move(to: CGPoint(x: left, y: headerBottom)); path.line(to: CGPoint(x: right, y: headerBottom))
@@ -327,10 +349,10 @@ struct DaysOutOfDaysExporter {
             path.move(to: CGPoint(x: left, y: y)); path.line(to: CGPoint(x: right, y: y))
         }
 
-        // Column separators: name | TOT | WRK | HLD | day, day, day...
+        // Column separators: name | summary columns... | day, day, day...
         var x = left + nameColWidth
         path.move(to: CGPoint(x: x, y: top)); path.line(to: CGPoint(x: x, y: bottom))
-        for _ in 0..<3 {
+        for _ in 0..<summaryColCount {
             x += summaryColWidth
             path.move(to: CGPoint(x: x, y: top)); path.line(to: CGPoint(x: x, y: bottom))
         }
