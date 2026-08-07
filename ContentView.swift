@@ -221,23 +221,52 @@ struct ContentView: View {
 
     private func applyBreakdownBrowserSheet<Content: View>(_ content: Content) -> some View {
         content
-            .sheet(isPresented: $showingBreakdownBrowser) {
-                if breakdownBrowserScenes.indices.contains(breakdownBrowserIndex) {
-                    SceneEditSheet(
-                        scene: breakdownBrowserSceneBinding,
-                        isPresented: $showingBreakdownBrowser,
-                        onSave: { markDirty() },
-                        onDelete: { deleteCurrentBreakdownScene() },
-                        canGoPrevious: breakdownBrowserIndex > 0,
-                        canGoNext: breakdownBrowserIndex < breakdownBrowserScenes.count - 1,
-                        onPrevious: goToPreviousBreakdownScene,
-                        onNext: goToNextBreakdownScene,
-                        positionLabel: "Scene \(breakdownBrowserIndex + 1) of \(breakdownBrowserScenes.count) — script order",
-                        breakdownExpandedByDefault: true,
-                        closeAfterDelete: false
-                    )
-                }
+            .background(
+                Color.clear
+                    .frame(width: 0, height: 0)
+                    .sheet(isPresented: $showingBreakdownBrowser) { breakdownBrowserEditSheet }
+            )
+    }
+
+    /// Mirrors unscheduledEditSheet's structure exactly: binds directly into the local
+    /// breakdownBrowserScenes snapshot (a native array-subscript binding, the same proven
+    /// mechanism the Boneyard's own editor uses) rather than a hand-written Binding — a
+    /// custom get/set Binding here was the actual cause of the Next button getting stuck
+    /// disabled, since SwiftUI wasn't reliably treating it as "the same field" needing a
+    /// fresh read on every navigation, and a fixed field re-population is exactly what
+    /// canGoNext's validity check depends on. Edits get written back to the real
+    /// allScenes/shootDays location in writeBackCurrentBreakdownScene(), called from onSave.
+    @ViewBuilder
+    private var breakdownBrowserEditSheet: some View {
+        if breakdownBrowserScenes.indices.contains(breakdownBrowserIndex) {
+            SceneEditSheet(
+                scene: $breakdownBrowserScenes[breakdownBrowserIndex],
+                isPresented: $showingBreakdownBrowser,
+                onSave: { markDirty(); writeBackCurrentBreakdownScene() },
+                onDelete: { deleteCurrentBreakdownScene() },
+                canGoPrevious: breakdownBrowserIndex > 0,
+                canGoNext: breakdownBrowserIndex < breakdownBrowserScenes.count - 1,
+                onPrevious: goToPreviousBreakdownScene,
+                onNext: goToNextBreakdownScene,
+                positionLabel: "Scene \(breakdownBrowserIndex + 1) of \(breakdownBrowserScenes.count) — script order",
+                breakdownExpandedByDefault: true,
+                closeAfterDelete: false
+            )
+        } else {
+            VStack(spacing: 20) {
+                Text("No scenes to browse").font(.title2).foregroundColor(.secondary)
+                Button("Close") { showingBreakdownBrowser = false }
+                    .buttonStyle(.borderedProminent)
             }
+            .padding(24).frame(width: 400)
+            .onAppear {
+                // Self-healing retry: if this rendered because breakdownBrowserScenes
+                // hadn't caught up with the freshly-scanned data yet, this re-scans now
+                // that the view has actually appeared, which flips the sheet over to the
+                // real editor automatically — no click elsewhere required.
+                populateBreakdownBrowserScenes()
+            }
+        }
     }
 
     private func applyLifecycle<Content: View>(_ content: Content) -> some View {
@@ -960,7 +989,14 @@ struct ContentView: View {
 
     // MARK: - Breakdown Browser
 
-    private func openBreakdownBrowser() {
+    /// Scans allScenes + every day's scenes for the full script-order list. Returns
+    /// whether anything was found. Shared by openBreakdownBrowser() and the fallback
+    /// view's self-healing retry (see breakdownBrowserEditSheet) — the latter exists
+    /// because notification-driven state changes have shown a timing quirk where the
+    /// sheet can present a beat before breakdownBrowserScenes has caught up, rendering
+    /// the empty-state fallback even though scenes genuinely exist.
+    @discardableResult
+    private func populateBreakdownBrowserScenes() -> Bool {
         var seen = Set<UUID>()
         var combined: [Scene] = []
         for s in allScenes where !seen.contains(s.id) { seen.insert(s.id); combined.append(s) }
@@ -968,39 +1004,38 @@ struct ContentView: View {
             for s in day.scenes where !seen.contains(s.id) { seen.insert(s.id); combined.append(s) }
         }
         breakdownBrowserScenes = combined.sorted { $0.scriptOrderKey < $1.scriptOrderKey }
+        if breakdownBrowserIndex >= breakdownBrowserScenes.count {
+            breakdownBrowserIndex = 0
+        }
+        return !breakdownBrowserScenes.isEmpty
+    }
+
+    private func openBreakdownBrowser() {
+        guard populateBreakdownBrowserScenes() else {
+            alertMessage = "There are no scenes to browse yet — add some scenes first."
+            showingAlert = true
+            return
+        }
         breakdownBrowserIndex = 0
         showingBreakdownBrowser = true
     }
 
-    /// Resolves to wherever the current browser scene actually lives right now (Boneyard
-    /// or a specific day) for both reading and writing, so SceneEditSheet can edit it
-    /// without needing to know or care which one it is.
-    private var breakdownBrowserSceneBinding: Binding<Scene> {
-        Binding<Scene>(
-            get: {
-                guard breakdownBrowserScenes.indices.contains(breakdownBrowserIndex) else {
-                    return Scene(title: "", duration: 0, estimatedTime: 0)
-                }
-                let id = breakdownBrowserScenes[breakdownBrowserIndex].id
-                if let s = allScenes.first(where: { $0.id == id }) { return s }
-                for day in shootDays {
-                    if let s = day.scenes.first(where: { $0.id == id }) { return s }
-                }
-                return breakdownBrowserScenes[breakdownBrowserIndex]
-            },
-            set: { newValue in
-                if let i = allScenes.firstIndex(where: { $0.id == newValue.id }) {
-                    allScenes[i] = newValue
-                    return
-                }
-                for d in shootDays.indices {
-                    if let i = shootDays[d].scenes.firstIndex(where: { $0.id == newValue.id }) {
-                        shootDays[d].scenes[i] = newValue
-                        return
-                    }
-                }
+    /// Writes the just-edited scene (now updated in the local breakdownBrowserScenes
+    /// snapshot, since that's what SceneEditSheet binds to) back to wherever it actually
+    /// lives — Boneyard or a specific day.
+    private func writeBackCurrentBreakdownScene() {
+        guard breakdownBrowserScenes.indices.contains(breakdownBrowserIndex) else { return }
+        let scene = breakdownBrowserScenes[breakdownBrowserIndex]
+        if let i = allScenes.firstIndex(where: { $0.id == scene.id }) {
+            allScenes[i] = scene
+            return
+        }
+        for d in shootDays.indices {
+            if let i = shootDays[d].scenes.firstIndex(where: { $0.id == scene.id }) {
+                shootDays[d].scenes[i] = scene
+                return
             }
-        )
+        }
     }
 
     private func deleteCurrentBreakdownScene() {
