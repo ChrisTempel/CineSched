@@ -43,7 +43,6 @@ struct ContentView: View {
     @State var showingAlert             = false
     @State var showingImportAlert       = false
     @State private var showingClearAllConfirmation = false
-    @State private var showingUnscheduledSceneEditSheet = false
 
     @State var alertMessage:   String = ""
     @State var importMessage:  String = ""
@@ -66,8 +65,6 @@ struct ContentView: View {
     @State var currentFileURL: URL? = nil
 
     // Production Setup sheet
-    @State private var showingProductionSetup = false
-    @State private var showingConflictReport = false
     @State private var conflictReportResults: [ScheduleConflict] = []
     /// Set to trigger the calendar scrolling to a specific date — used when jumping to a
     /// conflict from the report. Reset to nil right after the calendar handles it.
@@ -83,7 +80,6 @@ struct ContentView: View {
     // MARK: - Breakdown Browser
     // A dedicated way to step through every scene in script order (regardless of
     // scheduling status) for breakdown tagging — see openBreakdownBrowser().
-    @State private var showingBreakdownBrowser = false
     @State private var breakdownBrowserScenes: [Scene] = []   // snapshot in script order, captured on open
     @State private var breakdownBrowserIndex: Int = 0
 
@@ -107,7 +103,33 @@ struct ContentView: View {
     @State private var conflictSceneIDs: Set<UUID> = []
     @State private var scheduleLockChanges: [ScheduleLockChange] = []
     @State private var scheduleLockChangedDates: Set<Date> = []
-    @State private var showingScheduleLockReport = false
+
+    // MARK: - Sheet presentation
+    //
+    // A single source of truth for which sheet (if any) is showing, instead of five
+    // independent `@State private var showingX: Bool` flags each with their own
+    // `.sheet(isPresented:)` modifier. Stacking several `.sheet` modifiers on the same
+    // view is a known SwiftUI-on-macOS trouble spot — later ones in the chain can fail to
+    // present reliably, especially when triggered from notification-driven state changes
+    // rather than a direct button tap, which is exactly what made the Breakdown Browser
+    // intermittent. A single `.sheet(item:)` means there's only ever one presentation-link
+    // for SwiftUI to manage, which removes the whole class of issue rather than patching
+    // around its symptoms.
+    private enum ActiveSheet: Identifiable, Hashable {
+        case unscheduledEdit, productionSetup, conflictReport, scheduleLockReport, breakdownBrowser
+        var id: Self { self }
+    }
+    @State private var activeSheet: ActiveSheet? = nil
+
+    private var isPresentedUnscheduledEdit: Binding<Bool> {
+        Binding(get: { activeSheet == .unscheduledEdit }, set: { if !$0 { activeSheet = nil } })
+    }
+    private var isPresentedProductionSetup: Binding<Bool> {
+        Binding(get: { activeSheet == .productionSetup }, set: { if !$0 { activeSheet = nil } })
+    }
+    private var isPresentedBreakdownBrowser: Binding<Bool> {
+        Binding(get: { activeSheet == .breakdownBrowser }, set: { if !$0 { activeSheet = nil } })
+    }
 
     // Boneyard sort — persisted so your preferred sort (e.g. Location) is still
     // applied the next time you open the project.
@@ -152,8 +174,7 @@ struct ContentView: View {
 
         let withAlerts = applyAlerts(base)
         let withSheets = applySheets(withAlerts)
-        let withBreakdownSheet = applyBreakdownBrowserSheet(withSheets)
-        let withLifecycle = applyLifecycle(withBreakdownSheet)
+        let withLifecycle = applyLifecycle(withSheets)
         let withNotificationsA = applyNotificationHandlersA(withLifecycle)
         let withNotificationsB = applyNotificationHandlersB(withNotificationsA)
         return applyNotificationHandlersC(withNotificationsB)
@@ -184,48 +205,45 @@ struct ContentView: View {
 
     private func applySheets<Content: View>(_ content: Content) -> some View {
         content
-            .sheet(isPresented: $showingUnscheduledSceneEditSheet) { unscheduledEditSheet }
-            .onChange(of: showingUnscheduledSceneEditSheet) { _, isShowing in
-                if !isShowing { clearUnscheduledEditingState() }
+            .sheet(item: $activeSheet) { sheet in
+                switch sheet {
+                case .unscheduledEdit:
+                    unscheduledEditSheet
+                case .productionSetup:
+                    ProductionSetupSheet(
+                        productionInfo: $productionInfo,
+                        isPresented: isPresentedProductionSetup,
+                        onSave: { markDirty(); recomputeConflicts(); recomputeScheduleLockChanges() },
+                        onCharacterRenamed: renameCastCharacter
+                    )
+                case .conflictReport:
+                    ConflictReportSheet(
+                        conflicts: conflictReportResults,
+                        onSelectDate: { date in
+                            activeSheet = nil
+                            scrollToDate = date
+                        },
+                        onDismiss: { activeSheet = nil }
+                    )
+                case .scheduleLockReport:
+                    ScheduleLockReportSheet(
+                        changes: scheduleLockChanges,
+                        lockedAt: productionInfo.scheduleLock?.lockedAt,
+                        onSelectDate: { date in
+                            activeSheet = nil
+                            scrollToDate = date
+                        },
+                        onDismiss: { activeSheet = nil }
+                    )
+                case .breakdownBrowser:
+                    breakdownBrowserEditSheet
+                }
             }
-            .sheet(isPresented: $showingProductionSetup) {
-                ProductionSetupSheet(
-                    productionInfo: $productionInfo,
-                    isPresented: $showingProductionSetup,
-                    onSave: { markDirty(); recomputeConflicts(); recomputeScheduleLockChanges() },
-                    onCharacterRenamed: renameCastCharacter
-                )
+            .onChange(of: activeSheet) { oldValue, newValue in
+                if oldValue == .unscheduledEdit && newValue != .unscheduledEdit {
+                    clearUnscheduledEditingState()
+                }
             }
-            .sheet(isPresented: $showingConflictReport) {
-                ConflictReportSheet(
-                    conflicts: conflictReportResults,
-                    onSelectDate: { date in
-                        showingConflictReport = false
-                        scrollToDate = date
-                    },
-                    onDismiss: { showingConflictReport = false }
-                )
-            }
-            .sheet(isPresented: $showingScheduleLockReport) {
-                ScheduleLockReportSheet(
-                    changes: scheduleLockChanges,
-                    lockedAt: productionInfo.scheduleLock?.lockedAt,
-                    onSelectDate: { date in
-                        showingScheduleLockReport = false
-                        scrollToDate = date
-                    },
-                    onDismiss: { showingScheduleLockReport = false }
-                )
-            }
-    }
-
-    private func applyBreakdownBrowserSheet<Content: View>(_ content: Content) -> some View {
-        content
-            .background(
-                Color.clear
-                    .frame(width: 0, height: 0)
-                    .sheet(isPresented: $showingBreakdownBrowser) { breakdownBrowserEditSheet }
-            )
     }
 
     /// Mirrors unscheduledEditSheet's structure exactly: binds directly into the local
@@ -238,35 +256,38 @@ struct ContentView: View {
     /// allScenes/shootDays location in writeBackCurrentBreakdownScene(), called from onSave.
     @ViewBuilder
     private var breakdownBrowserEditSheet: some View {
-        if breakdownBrowserScenes.indices.contains(breakdownBrowserIndex) {
-            SceneEditSheet(
-                scene: $breakdownBrowserScenes[breakdownBrowserIndex],
-                isPresented: $showingBreakdownBrowser,
-                onSave: { markDirty(); writeBackCurrentBreakdownScene() },
-                onDelete: { deleteCurrentBreakdownScene() },
-                canGoPrevious: breakdownBrowserIndex > 0,
-                canGoNext: breakdownBrowserIndex < breakdownBrowserScenes.count - 1,
-                onPrevious: goToPreviousBreakdownScene,
-                onNext: goToNextBreakdownScene,
-                positionLabel: "Scene \(breakdownBrowserIndex + 1) of \(breakdownBrowserScenes.count) — script order",
-                breakdownExpandedByDefault: true,
-                closeAfterDelete: false
-            )
-        } else {
-            VStack(spacing: 20) {
-                Text("No scenes to browse").font(.title2).foregroundColor(.secondary)
-                Button("Close") { showingBreakdownBrowser = false }
-                    .buttonStyle(.borderedProminent)
-            }
-            .padding(24).frame(width: 400)
-            .onAppear {
-                // Self-healing retry: if this rendered because breakdownBrowserScenes
-                // hadn't caught up with the freshly-scanned data yet, this re-scans now
-                // that the view has actually appeared, which flips the sheet over to the
-                // real editor automatically — no click elsewhere required.
-                populateBreakdownBrowserScenes()
+        Group {
+            if breakdownBrowserScenes.indices.contains(breakdownBrowserIndex) {
+                SceneEditSheet(
+                    scene: $breakdownBrowserScenes[breakdownBrowserIndex],
+                    isPresented: isPresentedBreakdownBrowser,
+                    onSave: { markDirty(); writeBackCurrentBreakdownScene() },
+                    onDelete: { deleteCurrentBreakdownScene() },
+                    canGoPrevious: breakdownBrowserIndex > 0,
+                    canGoNext: breakdownBrowserIndex < breakdownBrowserScenes.count - 1,
+                    onPrevious: goToPreviousBreakdownScene,
+                    onNext: goToNextBreakdownScene,
+                    positionLabel: "Scene \(breakdownBrowserIndex + 1) of \(breakdownBrowserScenes.count) — script order",
+                    breakdownExpandedByDefault: true,
+                    closeAfterDelete: false
+                )
+            } else {
+                VStack(spacing: 20) {
+                    Text("No scenes to browse").font(.title2).foregroundColor(.secondary)
+                    Button("Close") { activeSheet = nil }
+                        .buttonStyle(.borderedProminent)
+                }
+                .padding(24).frame(width: 400)
+                .onAppear {
+                    // Self-healing retry: if this rendered because breakdownBrowserScenes
+                    // hadn't caught up with the freshly-scanned data yet, this re-scans now
+                    // that the view has actually appeared, which flips the sheet over to the
+                    // real editor automatically — no click elsewhere required.
+                    populateBreakdownBrowserScenes()
+                }
             }
         }
+        .id(breakdownBrowserScenes.isEmpty)
     }
 
     private func applyLifecycle<Content: View>(_ content: Content) -> some View {
@@ -330,11 +351,11 @@ struct ContentView: View {
                 showDaysOutOfDaysPDFSavePanel()
             }
             .onReceive(NotificationCenter.default.publisher(for: .csOpenProductionSetup)) { _ in
-                showingProductionSetup = true
+                activeSheet = .productionSetup
             }
             .onReceive(NotificationCenter.default.publisher(for: .csScanForConflicts)) { _ in
                 conflictReportResults = ConflictScanner.scan(shootDays: shootDays, productionInfo: productionInfo)
-                showingConflictReport = true
+                activeSheet = .conflictReport
             }
             .onReceive(NotificationCenter.default.publisher(for: .csUndo)) { _ in
                 performUndo()
@@ -359,7 +380,7 @@ struct ContentView: View {
                 unlockSchedule()
             }
             .onReceive(NotificationCenter.default.publisher(for: .csShowScheduleLockReport)) { _ in
-                showingScheduleLockReport = true
+                activeSheet = .scheduleLockReport
             }
     }
 
@@ -700,7 +721,7 @@ struct ContentView: View {
                         TapGesture(count: 2).onEnded {
                             editingUnscheduledSceneIndex = item.index
                             editingUnscheduledScene      = item.scene
-                            showingUnscheduledSceneEditSheet = true
+                            activeSheet = .unscheduledEdit
                         }
                     )
                     .simultaneousGesture(
@@ -712,7 +733,7 @@ struct ContentView: View {
                         Button("Edit Scene") {
                             editingUnscheduledSceneIndex = item.index
                             editingUnscheduledScene      = item.scene
-                            showingUnscheduledSceneEditSheet = true
+                            activeSheet = .unscheduledEdit
                         }
                         Button("Duplicate Scene") {
                             captureUndoSnapshot()
@@ -954,7 +975,7 @@ struct ContentView: View {
         if let idx = editingUnscheduledSceneIndex, idx < allScenes.count {
             SceneEditSheet(
                 scene: $allScenes[idx],
-                isPresented: $showingUnscheduledSceneEditSheet,
+                isPresented: isPresentedUnscheduledEdit,
                 onSave: { markDirty() },
                 onDelete: {
                     captureUndoSnapshot()
@@ -973,7 +994,7 @@ struct ContentView: View {
                 Text("Error: Scene not found").font(.title2).foregroundColor(.red)
                 Text("The scene may have been deleted.").font(.body).multilineTextAlignment(.center)
                 Button("Close") {
-                    showingUnscheduledSceneEditSheet = false
+                    activeSheet = nil
                     clearUnscheduledEditingState()
                 }
                 .buttonStyle(.borderedProminent)
@@ -1017,7 +1038,7 @@ struct ContentView: View {
             return
         }
         breakdownBrowserIndex = 0
-        showingBreakdownBrowser = true
+        activeSheet = .breakdownBrowser
     }
 
     /// Writes the just-edited scene (now updated in the local breakdownBrowserScenes
@@ -1057,7 +1078,7 @@ struct ContentView: View {
             breakdownBrowserIndex = max(0, breakdownBrowserScenes.count - 1)
         }
         markDirty()
-        if breakdownBrowserScenes.isEmpty { showingBreakdownBrowser = false }
+        if breakdownBrowserScenes.isEmpty { activeSheet = nil }
     }
 
     private func goToPreviousBreakdownScene() {
