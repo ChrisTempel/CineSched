@@ -2,6 +2,42 @@
 
 All notable changes to CineSched are documented here.
 
+## [4.5.1] - 2026 (Monthly Calendar & Vector Export Edition)
+### Added
+- **Full Monthly Calendar View (Vista por Mes)** — Intuitive month-by-month calendar navigation with system theme matching, shoot range highlighting, and month-level scheduling.
+- **Interactive Day Detail Modal (DayDetailSheet)** — Double-click any day in the month view to open a rich modal inspector with production day numbers, page/scene statistics, call sheet schedule badges (Call, Lunch, Snack, Wrap, Basecamp), and agenda event management.
+- **Adaptive Day Inspector** — Context-aware presentation: shoot days show full call sheet and scene breakdown actions; off-days and prep days display an uncluttered agenda management view.
+- **Shoot Days Only View Mode** — Filter out non-production days and off-range calendar events to focus strictly on scheduled shoot days.
+- **Boneyard to Calendar Drag-and-Drop** — Seamlessly drag script scenes directly from the Boneyard (`allScenes`) into any calendar cell or empty date tile.
+- **Calendar Event Deletion & Management** — Direct delete buttons (trash icon) in the day detail sheet and right-click context menu (`Eliminar Evento` / `Delete Event`) on event chips.
+- **2-Page High-Resolution Monthly PDF Exporter**:
+  - **Page 1 (Full-Height Calendar Grid)**: 100% of the page height is dedicated to the calendar grid, ensuring tall, spacious day cells with legible scene numbers, titles, octavos, and start times without compression.
+  - **Page 2 (Detailed Monthly Breakdown & Schedule)**: Generates a second page with comprehensive structured cards for every active day of the month, displaying complete scene synopses, INT/EXT headings, cast list, real locations, call sheet times, and agenda events.
+
+### Improved
+- **Anti-Data-Loss Safety Net in "Update Calendar"** — When adjusting or trimming the production date range, all displaced script scenes automatically return to the Boneyard (`allScenes`) rather than being discarded.
+- **Anchored Calendar Events** — Agenda events (`isCalendarEvent`) are permanently locked to their absolute calendar dates and are excluded from "Shift Schedule" scene displacements.
+- **Clean Event Typography** — Removed redundant calendar emoji icons from event chips in favor of crisp time-prefixed badges (`10:00 AM · Lectura de guion`).
+- **Production Day Numbering Integrity** — Calendar-only events outside the shooting schedule do not increment production day numbers (`Día #1`, `Día #2`).
+
+## [4.5.0] - 2026 (D.G.D Edition)
+### Added
+- **Dynamic Shooting Schedule (Plan de Rodaje) Vector PDF Exporter** — standard vector PDF exporter with 4 bounded columns (Time, Scene and Full Slugline, Script Page, Eighths) with zero text collisions and dynamic milestone badges.
+- **Automated Timeline Cascade & Quick Time Editor** — dynamic hour calculation from call to wrap, dual-mode fixed/cascade selector, duration stepper controls, and double-click time editing directly on stripboard rows.
+- **100% Full Multilingual Localization (Español / English)** — reactive UI translations for all windows, sheets, menus, date formatters, and export reports.
+- **Fixed 7-Column Production Calendar** — uniform Monday-to-Sunday production grid with exact weekday alignment.
+- **Decoupled Calendar Events** — independent non-scene calendar events (travel, rehearsal, rest days) that do not enter the Boneyard or alter scene breakdown statistics.
+- **Notice & Milestone Banners** — customizable banner strips with color presets and dynamic call sheet synchronization.
+
+## [4.0] - 2026
+### Added
+- **Call Sheet Reference Redesign** — industry-standard layout in 100% English with clean light gray header, prominent general call time, quote of the day, 12h meal/milestone times (Ready to Shoot, Lunch, Snack, Wrap), nearest hospital, full scene breakdown with clean decorado sluglines, cast call, crew call times, and unified general notes.
+- **Production Contacts Sync** — Director, Producer, and 1st AD names and phone numbers in Production Setup automatically populate Call Sheet shooting contacts across every shoot day.
+- **Real Location with Live Autocomplete** — enter real set/location names when creating or editing scenes with predictive autocomplete suggestions from all project locations.
+- **Location Sync Without Duplicates** — distinct locations from scheduled scenes automatically populate the Call Sheet location list (LOC 1, LOC 2...) without repeats.
+- **Fountain & Highland Script Importer** — import industry standard `.fountain` and `.highland` script archives with full page pagination and character breakdown.
+- **Stripboard PDF Exporter** — export strip schedules directly to clean PDF sheets.
+
 ## [3.2] - 2026
 ### Added
 - **Custom scene type** — a third strip type alongside Day and Night, displayed in red. Use it for company moves, meal breaks, or any non-scene entry. Custom strips only require a title — page count and time estimate are optional

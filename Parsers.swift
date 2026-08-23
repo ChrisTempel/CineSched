@@ -64,6 +64,19 @@ struct FractionParser {
 
 struct TimeParser {
 
+    /// Rough industry rule of thumb — about two hours of shoot time per
+    /// script page, covering setup/lighting/blocking overhead on top of the
+    /// performance itself — used to seed a starting shoot-time estimate for
+    /// imported scenes, extrapolated from the scene's own page count.
+    static let averageMinutesPerEighth: Double = 15
+
+    /// Estimated shoot time for a scene of the given length (in eighths),
+    /// extrapolated from `averageMinutesPerEighth`. Never returns less than
+    /// a minute so a real (non-notice) scene never imports as "0 min".
+    static func estimatedMinutes(forEighths eighths: Int) -> Int {
+        max(1, Int((Double(eighths) * averageMinutesPerEighth).rounded()))
+    }
+
     /// Converts various time input formats to minutes.
     ///
     /// Rules:

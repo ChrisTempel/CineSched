@@ -71,9 +71,7 @@ struct ProjectFile: FileDocument {
 
 extension ContentView {
 
-    /// Marks the project as having unsaved changes. The actual save is triggered
-    /// by .onChange(of: hasUnsavedChanges) in ContentView with a Task/sleep debounce,
-    /// so rapid edits (e.g. typing a title) only result in one save after the user pauses.
+    /// Marks the project as having unsaved changes.
     func markDirty() {
         hasUnsavedChanges = true
     }
@@ -108,10 +106,7 @@ extension ContentView {
 
     private static let currentFileBookmarkKey = "CineSchedCurrentFileBookmark"
 
-    /// Sets currentFileURL and remembers it as a security-scoped bookmark, so "Save" still
-    /// knows where to write silently even after quitting and relaunching the app. A plain
-    /// saved path wouldn't survive a relaunch in a sandboxed app — see the note on
-    /// RecentFilesStore for why a bookmark is required instead.
+    /// Sets currentFileURL and remembers it as a security-scoped bookmark.
     func setCurrentFileURL(_ url: URL) {
         currentFileURL = url
         if let bookmark = try? url.bookmarkData(
@@ -121,12 +116,7 @@ extension ContentView {
         }
     }
 
-    /// Restores the last-known file location on launch. Called from .onAppear. Unlike a
-    /// fresh URL from an NSOpenPanel/NSSavePanel (which already carries an implicit access
-    /// grant for the running session), a URL resolved from a bookmark needs an explicit
-    /// `startAccessingSecurityScopedResource()` call — and that access is deliberately never
-    /// stopped afterward, since this URL stays "live" as the file silent Saves write to for
-    /// the rest of this session. It's released automatically when the app quits.
+    /// Restores the last-known file location on launch. Called from .onAppear.
     func restoreCurrentFileURL() {
         guard let bookmarkData = UserDefaults.standard.data(forKey: Self.currentFileBookmarkKey) else { return }
         var isStale = false
@@ -135,25 +125,20 @@ extension ContentView {
               url.startAccessingSecurityScopedResource() else { return }
         currentFileURL = url
         if isStale {
-            // The file moved since this bookmark was created; refresh it for next time.
             if let refreshed = try? url.bookmarkData(options: .withSecurityScope, includingResourceValuesForKeys: nil, relativeTo: nil) {
                 UserDefaults.standard.set(refreshed, forKey: Self.currentFileBookmarkKey)
             }
         }
     }
 
-    /// The folder to default file panels to: wherever the project was last saved to or
-    /// loaded from, if anywhere yet — otherwise nil, which leaves NSSavePanel/NSOpenPanel
-    /// to fall back to their own naturally-remembered last location instead of always
-    /// forcing Documents.
+    /// The folder to default file panels to.
     var defaultPanelDirectory: URL? {
         currentFileURL?.deletingLastPathComponent()
     }
 
     // MARK: - Manual save (native NSSavePanel)
 
-    /// "Save": writes silently to the file this project was last saved to or loaded from,
-    /// if any; otherwise behaves like "Save As…" since there's nowhere yet to save to.
+    /// "Save": writes silently to the file this project was last saved to or loaded from.
     func saveProject() {
         if let url = currentFileURL {
             saveProjectDirectly(to: url)
@@ -208,10 +193,6 @@ extension ContentView {
     // MARK: - Load from file
 
     func loadProject(from url: URL) {
-        // Intentionally not using a defer-scoped stop here: this URL is about to become
-        // the current project file, and needs to stay writable for silent Saves for the
-        // rest of this session — not just for this one read. Access is released
-        // automatically when the app quits.
         _ = url.startAccessingSecurityScopedResource()
 
         do {
@@ -228,10 +209,7 @@ extension ContentView {
 
     // MARK: - Apply loaded data to state
 
-    /// Decodes project data and updates all state variables.
-    /// Tries current format → plain decoder → legacy format in sequence.
     private func applyLoadedData(from data: Data, source: String) {
-        // Helper closure applied when a ProjectData is successfully decoded
         func apply(_ loaded: ProjectData) {
             allScenes          = loaded.allScenes
             shootDays          = loaded.shootDays
@@ -305,19 +283,19 @@ extension ContentView {
         }
     }
 
-    func showFDXOpenPanel() {
+    /// Single "Import Script…" entry point for every supported screenplay format —
+    /// dispatches by extension to the Final Draft (.fdx/.xml) or Fountain
+    /// (.fountain/.md/.spmd) importer once a file is chosen.
+    func showScriptImportPanel() {
         let panel = NSOpenPanel()
-        panel.title                = "Import Final Draft Script"
+        panel.title                = "Import Script"
         panel.prompt               = "Import"
-        // UTType(filenameExtension:) matches by extension alone, so this works whether or
-        // not Final Draft is installed. UTType(importedAs: "com.finaldraft.fdx") — the
-        // previous approach — only actually resolves once Final Draft itself registers
-        // that type with macOS, so on a machine without Final Draft, .fdx files would show
-        // up grayed out and unselectable in this panel even though the parser below has
-        // never depended on Final Draft being present at all.
         var allowedTypes: [UTType] = []
         if let fdxType = UTType(filenameExtension: "fdx") { allowedTypes.append(fdxType) }
         allowedTypes.append(.xml)
+        for ext in FountainImporter.supportedExtensions {
+            if let type = UTType(filenameExtension: ext) { allowedTypes.append(type) }
+        }
         panel.allowedContentTypes  = allowedTypes
         panel.allowsMultipleSelection = false
         panel.canChooseDirectories = false
@@ -325,7 +303,12 @@ extension ContentView {
         panel.begin { [self] response in
             DispatchQueue.main.async {
                 guard response == .OK, let url = panel.url else { return }
-                self.importFDXScript(from: url)
+                let ext = url.pathExtension.lowercased()
+                if FountainImporter.supportedExtensions.contains(ext) {
+                    self.beginFountainImport(from: url)
+                } else {
+                    self.importFDXScript(from: url)
+                }
             }
         }
     }
@@ -347,22 +330,85 @@ extension ContentView {
             }
             var count = 0
             for ps in parsed {
-                let type: DayNightType = ps.timeOfDay == .night ? .night : .day
+                let type: DayNightType
+                switch ps.timeOfDay {
+                case .night:         type = .night
+                case .dawn:          type = .dawn
+                case .dusk:          type = .dusk
+                case .afternoon:     type = .afternoon
+                case .day, .unknown: type = .day
+                }
+                let duration = max(1, ps.duration)
                 allScenes.append(Scene(
-                    title:         "\(ps.sceneNumber). \(ps.location)",
-                    duration:      1,
-                    estimatedTime: 15,
-                    dayNightType:  type
+                    title:         ps.location,
+                    sceneNumber:   ps.sceneNumber,
+                    duration:      duration,
+                    estimatedTime: TimeParser.estimatedMinutes(forEighths: duration),
+                    dayNightType:  type,
+                    cast:          ps.cast
                 ))
                 count += 1
             }
             markDirty()
-            importMessage = "Imported \(count) scene\(count == 1 ? "" : "s") from '\(url.lastPathComponent)'.\n\nScenes added to Boneyard with default values (1/8 page, 15 min). Edit before scheduling."
+            importMessage = "Imported \(count) scene\(count == 1 ? "" : "s") from '\(url.lastPathComponent)' with automatically calculated page eighths and character lists."
             showingImportAlert = true
         } catch {
             importMessage = "Failed to import script: \(error.localizedDescription)"
             showingImportAlert = true
         }
+    }
+
+    // MARK: - Fountain import
+
+    func beginFountainImport(from url: URL) {
+        guard url.startAccessingSecurityScopedResource() else {
+            importMessage = "Unable to access the selected file."
+            showingImportAlert = true
+            return
+        }
+        FountainImporter.importScript(from: url) { [self] outcome in
+            url.stopAccessingSecurityScopedResource()
+            switch outcome {
+            case .failure(let error):
+                importMessage = error.localizedDescription
+                showingImportAlert = true
+            case .success(let result):
+                applyFountainImport(result)
+            }
+        }
+    }
+
+    /// Fountain import only ever adds scenes to the Boneyard — it never touches
+    /// existing scenes, shoot days, or the project title — but if a project
+    /// already has content in it, confirm first rather than silently dropping
+    /// a new batch of scenes into it.
+    private func applyFountainImport(_ result: FountainImportResult) {
+        let hasExistingProject = !allScenes.isEmpty
+            || shootDays.contains { !$0.scenes.isEmpty }
+            || projectTitle != "Untitled Movie"
+        if hasExistingProject {
+            pendingFountainImport = result
+            showingFountainImportConfirmation = true
+        } else {
+            commitFountainImport(result)
+        }
+    }
+
+    func confirmPendingFountainImport() {
+        guard let result = pendingFountainImport else { return }
+        pendingFountainImport = nil
+        commitFountainImport(result)
+    }
+
+    func cancelPendingFountainImport() {
+        pendingFountainImport = nil
+    }
+
+    private func commitFountainImport(_ result: FountainImportResult) {
+        allScenes.append(contentsOf: result.scenes)
+        markDirty()
+        completedFountainImport = result
+        showingImportSummary = true
     }
 
     // MARK: - PDF exports (NSSavePanel)
@@ -382,6 +428,22 @@ extension ContentView {
         showPDFSavePanel(
             data: pdfData,
             defaultName: sanitizeFilename("\(projectTitle.isEmpty ? "MovieSchedule" : projectTitle)_Calendar")
+        )
+    }
+
+    func showStripboardPDFSavePanel() {
+        guard let pdfData = StripboardPDFExporter.generatePDF(
+            shootDays: shootDays,
+            projectTitle: projectTitle,
+            productionInfo: productionInfo
+        ) else {
+            alertMessage = "Couldn't generate a strip schedule PDF — schedule at least one scene first."
+            showingAlert = true
+            return
+        }
+        showPDFSavePanel(
+            data: pdfData,
+            defaultName: sanitizeFilename("\(projectTitle.isEmpty ? "MovieSchedule" : projectTitle)_StripSchedule")
         )
     }
 
@@ -419,10 +481,13 @@ extension ContentView {
     }
 
     func showCallSheetPDFSavePanel(for day: ShootDay) {
+        let dayNumbers = productionDayNumbers(for: shootDays)
         guard let pdfData = CallSheetExporter.generatePDF(
             shootDay: day,
             productionInfo: productionInfo,
-            projectTitle: projectTitle
+            projectTitle: projectTitle,
+            dayNumber: dayNumbers[day.id],
+            totalProductionDays: dayNumbers.values.max() ?? 0
         ) else {
             alertMessage = "Failed to generate call sheet PDF."
             showingAlert = true

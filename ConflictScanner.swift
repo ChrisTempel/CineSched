@@ -1,7 +1,7 @@
 // ConflictScanner.swift
 // Cross-references the schedule against each cast member's marked unavailable dates
 // and reports every scene where a character is scheduled to work while their actor is
-// marked unavailable that day.
+// marked unavailable that day. Also detects duplicate scene numbers across the project.
 
 import Foundation
 
@@ -36,7 +36,7 @@ struct ConflictScanner {
                         conflicts.append(ScheduleConflict(
                             date: day.date,
                             sceneID: scene.id,
-                            sceneTitle: scene.title,
+                            sceneTitle: scene.displayTitle,
                             character: character,
                             actorDisplayName: member.displayString
                         ))
@@ -59,5 +59,21 @@ struct ConflictScanner {
     /// happens to share a date with an unrelated conflict.
     static func conflictSceneIDs(_ conflicts: [ScheduleConflict]) -> Set<UUID> {
         Set(conflicts.map { $0.sceneID })
+    }
+
+    /// Scene IDs whose scene number collides with another scene's, anywhere in the
+    /// project — the Boneyard or any scheduled day. Numbers are compared by their
+    /// parsed (numeric, letter) value, so "3" and "03" count as the same number but
+    /// "3" and "3A" don't; blank scene numbers are never flagged, since most scenes
+    /// may not have one.
+    static func duplicateSceneNumberIDs(allScenes: [Scene], shootDays: [ShootDay]) -> Set<UUID> {
+        let scenes = allScenes + shootDays.flatMap { $0.scenes }
+        var idsByNumber: [String: [UUID]] = [:]
+        for scene in scenes {
+            guard let parsed = Scene.parseSceneNumber(scene.sceneNumber) else { continue }
+            let key = "\(parsed.number)\(parsed.letter)"
+            idsByNumber[key, default: []].append(scene.id)
+        }
+        return Set(idsByNumber.values.filter { $0.count > 1 }.flatMap { $0 })
     }
 }

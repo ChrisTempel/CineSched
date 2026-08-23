@@ -19,7 +19,9 @@ extension Notification.Name {
     static let csSaveProject         = Notification.Name("CineSched.saveProject")
     static let csSaveProjectAs       = Notification.Name("CineSched.saveProjectAs")
     static let csExportSchedulePDF   = Notification.Name("CineSched.exportSchedulePDF")
+    static let csExportStripboardPDF = Notification.Name("CineSched.exportStripboardPDF")
     static let csExportDaysOutOfDays = Notification.Name("CineSched.exportDaysOutOfDays")
+    static let csExportCallSheetPDF  = Notification.Name("CineSched.exportCallSheetPDF")
     static let csOpenProductionSetup = Notification.Name("CineSched.openProductionSetup")
     static let csScanForConflicts    = Notification.Name("CineSched.scanForConflicts")
     static let csOpenBreakdownBrowser = Notification.Name("CineSched.openBreakdownBrowser")
@@ -27,6 +29,8 @@ extension Notification.Name {
     static let csLockSchedule         = Notification.Name("CineSched.lockSchedule")
     static let csUnlockSchedule       = Notification.Name("CineSched.unlockSchedule")
     static let csShowScheduleLockReport = Notification.Name("CineSched.showScheduleLockReport")
+    static let csShowSceneColorSettings = Notification.Name("CineSched.showSceneColorSettings")
+    static let csShowColorLegend      = Notification.Name("CineSched.showColorLegend")
     static let csUndo = Notification.Name("CineSched.undo")
     static let csRedo = Notification.Name("CineSched.redo")
 }
