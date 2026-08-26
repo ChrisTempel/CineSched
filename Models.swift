@@ -191,6 +191,10 @@ struct Scene: Identifiable, Codable, Hashable {
     var mealKind: MealKind?
     var isCalendarEvent: Bool
     var customStartTime: String
+    /// Marks a scene as shot/done. Independent of dayNightType — previously the only way
+    /// to flag a scene as complete was hijacking the Custom type, which meant losing the
+    /// scene's real Day/Night/Dawn/Dusk/Afternoon classification to do it.
+    var isCompleted: Bool
 
     init(
         title: String,
@@ -221,7 +225,8 @@ struct Scene: Identifiable, Codable, Hashable {
         isAutoMeal: Bool = false,
         mealKind: MealKind? = nil,
         isCalendarEvent: Bool = false,
-        customStartTime: String = ""
+        customStartTime: String = "",
+        isCompleted: Bool = false
     ) {
         self.id               = UUID()
         self.title            = title
@@ -253,6 +258,7 @@ struct Scene: Identifiable, Codable, Hashable {
         self.mealKind         = mealKind
         self.isCalendarEvent  = isCalendarEvent
         self.customStartTime  = customStartTime
+        self.isCompleted      = isCompleted
     }
 
     static func createBanner(type: BannerType, title: String, note: String = "", estimatedTime: String = "0:30", colorHex: String = "8B5CF6") -> Scene {
@@ -363,6 +369,7 @@ struct Scene: Identifiable, Codable, Hashable {
         case realLocation, locationAddress
         case extras, props, setDressing, wardrobe, makeupHair, vehicles, specialEquipment, stunts, sfx, vfx, breakdownNotes
         case isBanner, bannerType, bannerTitle, bannerNote, bannerColorHex, isAutoMeal, mealKind, isCalendarEvent, customStartTime
+        case isCompleted
     }
 
     init(from decoder: Decoder) throws {
@@ -405,6 +412,7 @@ struct Scene: Identifiable, Codable, Hashable {
         mealKind         = (try? c.decodeIfPresent(MealKind.self, forKey: .mealKind)) ?? nil
         isCalendarEvent  = try c.decodeIfPresent(Bool.self, forKey: .isCalendarEvent) ?? false
         customStartTime  = try c.decodeIfPresent(String.self, forKey: .customStartTime) ?? ""
+        isCompleted      = try c.decodeIfPresent(Bool.self, forKey: .isCompleted) ?? false
     }
 
     /// "12A. INT. HOUSE - DAY" for display — combines the dedicated number field
@@ -500,6 +508,9 @@ struct Scene: Identifiable, Codable, Hashable {
     }
 
     var stripColor: Color {
+        if isCompleted {
+            return Color(hex: "9CA3AF")
+        }
         if isNoticeStrip {
             return Color(hex: "374151")
         }
@@ -527,7 +538,8 @@ struct Scene: Identifiable, Codable, Hashable {
     }
 
     var stripTextColor: Color {
-        isNoticeStrip ? .white : .black
+        if isCompleted { return Color(hex: "4B5563") }
+        return isNoticeStrip ? .white : .black
     }
 
     /// Splits a raw scene number like "12A" into its numeric and letter parts.

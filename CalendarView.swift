@@ -128,6 +128,7 @@ struct DayCellView: View {
     let onEditScene: (Int, Scene) -> Void
     let onRemoveScene: (Scene) -> Void
     let onDuplicateScene: (Scene) -> Void
+    let onToggleCompletedScene: (Scene) -> Void
     let onSelectScene: (Scene) -> Void
     let onSendToDay: (Scene) -> Void
     let onHandleSceneDrop: (UUID, Int) -> Void
@@ -326,6 +327,7 @@ struct DayCellView: View {
                         onEdit:      { onEditScene(sceneIndex, scene) },
                         onRemove:    { onRemoveScene(scene) },
                         onDuplicate: { onDuplicateScene(scene) },
+                        onToggleCompleted: { onToggleCompletedScene(scene) },
                         onDragStart: { draggedSceneId = scene.id },
                         onDragEnd:   { draggedSceneId = nil },
                         onSelect:    { onSelectScene(scene) },
@@ -630,7 +632,7 @@ struct CompactMonthCalendarView: View {
                     .padding(.horizontal, 16)
                     .padding(.bottom, 60)
                 }
-                .onChange(of: scrollToDate) { newValue in
+                .onChange(of: scrollToDate) { _, newValue in
                     guard let date = newValue else { return }
                     displayedMonth = date
                     if let target = shootDays.first(where: { Calendar.current.isDate($0.date, inSameDayAs: date) }) {
@@ -642,7 +644,7 @@ struct CompactMonthCalendarView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .tooltipContainer()
-        .onChange(of: dragStateResetToken) { _ in
+        .onChange(of: dragStateResetToken) { _, _ in
             // Undo/redo restores allScenes/shootDays but has no way to reach into this
             // view's own local drag-target state — this clears it explicitly so a day
             // cell's drop-target border can't get stuck highlighted after an undo.
@@ -746,7 +748,7 @@ struct CompactMonthCalendarView: View {
                 }
             )
         }
-        .onChange(of: showingEditSheet) { isShowing in
+        .onChange(of: showingEditSheet) { _, isShowing in
             if !isShowing { clearEditingState() }
         }
     }
@@ -901,6 +903,7 @@ struct CompactMonthCalendarView: View {
             onEditScene: { sceneIndex, scene in editScene(dayIndex: dayIndex, sceneIndex: sceneIndex, scene: scene, dayId: day.id) },
             onRemoveScene: { scene in removeFromDay(scene, dayId: day.id) },
             onDuplicateScene: { scene in duplicateScene(scene) },
+            onToggleCompletedScene: { scene in toggleSceneCompleted(scene) },
             onSelectScene: { scene in selectScene(scene, dayId: day.id) },
             onSendToDay: { scene in beginSendToDay(scene) },
             onHandleSceneDrop: { sceneId, pos in handleSceneDrop(sceneId: sceneId, targetDayId: day.id, targetPosition: pos) },
@@ -928,9 +931,20 @@ struct CompactMonthCalendarView: View {
     }
 
     private func saveCurrentSceneEdit() {
-        guard let editingScene, let editingDayId else { return }
+        guard let editingDayId, let editingDayIndex, let editingSceneIndex,
+              editingDayIndex < shootDays.count,
+              editingSceneIndex < shootDays[editingDayIndex].scenes.count else { return }
         onBeforeSceneChange()
-        updateScene(editingScene, editingDayId)
+        // SceneEditSheet already wrote every edited field directly into shootDays via its
+        // own live Binding by the time this fires — this call exists purely to trigger
+        // updateScene's markDirty() side effect (not exposed directly to this file), so it
+        // must use the scene as it now stands, not the `editingScene` snapshot captured
+        // back when the sheet was first opened. Passing that stale snapshot was the actual
+        // bug: it silently reverted every field — including a changed scene type — right
+        // back to whatever it was before the user opened the editor, immediately after
+        // SceneEditSheet had just correctly saved the real change.
+        let currentScene = shootDays[editingDayIndex].scenes[editingSceneIndex]
+        updateScene(currentScene, editingDayId)
     }
 
     private func clearEditingState() {
@@ -951,6 +965,20 @@ struct CompactMonthCalendarView: View {
         dup.id = UUID()
         onBeforeSceneChange()
         assignScene(dup, shootDays.first(where: { $0.id == dayId })!)
+    }
+
+    private func toggleSceneCompleted(_ scene: Scene) {
+        let newValue = !scene.isCompleted
+        let idsToToggle: Set<UUID> = (selectedSceneIDs.contains(scene.id) && selectedSceneIDs.count > 1)
+            ? selectedSceneIDs
+            : [scene.id]
+        onBeforeSceneChange()
+        for id in idsToToggle {
+            guard let dayIdx = shootDays.firstIndex(where: { $0.scenes.contains(where: { $0.id == id }) }),
+                  let sceneIdx = shootDays[dayIdx].scenes.firstIndex(where: { $0.id == id }) else { continue }
+            shootDays[dayIdx].scenes[sceneIdx].isCompleted = newValue
+        }
+        onSceneChanged()
     }
 
     private func selectScene(_ scene: Scene, dayId: UUID) {
@@ -1049,7 +1077,12 @@ struct CompactMonthCalendarView: View {
         guard let srcIdx = shootDays.firstIndex(where: { $0.id == sourceDayId }),
               let dstIdx = shootDays.firstIndex(where: { $0.id == targetDayId }),
               srcIdx != dstIdx else { return }
-        shootDays.swapAt(srcIdx, dstIdx)
+        let srcScenes    = shootDays[srcIdx].scenes
+        let srcCallSheet = shootDays[srcIdx].callSheet
+        shootDays[srcIdx].scenes    = shootDays[dstIdx].scenes
+        shootDays[srcIdx].callSheet = shootDays[dstIdx].callSheet
+        shootDays[dstIdx].scenes    = srcScenes
+        shootDays[dstIdx].callSheet = srcCallSheet
         onSceneChanged()
     }
 
@@ -1149,6 +1182,7 @@ struct SceneCardView: View {
     let onEdit:      () -> Void
     let onRemove:    () -> Void
     let onDuplicate: () -> Void
+    let onToggleCompleted: () -> Void
     let onDragStart: () -> Void
     let onDragEnd:   () -> Void
     let onSelect:    () -> Void
@@ -1251,6 +1285,10 @@ struct SceneCardView: View {
                 Button(LocalizationManager.shared.currentLanguage == .spanish ? "Editar Escena" : "Edit Scene") { onEdit() }
                 Button(LocalizationManager.shared.currentLanguage == .spanish ? "Duplicar Escena" : "Duplicate Scene") { onDuplicate() }
                 Button(LocalizationManager.shared.currentLanguage == .spanish ? "Mover a Día..." : "Move to Day...") { onSendToDay() }
+                Divider()
+                Button((isSelected && selectionCount > 1)
+                       ? "Mark \(selectionCount) Scenes as \(scene.isCompleted ? "Incomplete" : "Completed")"
+                       : (scene.isCompleted ? "Mark as Incomplete" : "Mark as Completed")) { onToggleCompleted() }
                 Divider()
                 Button(LocalizationManager.shared.currentLanguage == .spanish ? "Quitar del Día" : "Remove from Day") { onRemove() }
             }

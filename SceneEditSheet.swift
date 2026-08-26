@@ -133,7 +133,7 @@ struct SceneEditSheet: View {
                     )
                     .frame(height: 22)
                     .border(durationIsValid ? Color.clear : Color.red, width: 1)
-                    .onChange(of: editDuration) { _ in validateDuration() }
+                    .onChange(of: editDuration) { _, _ in validateDuration() }
 
                     if !durationIsValid {
                         Text("Invalid format. Use: 15 (eighths), 1 7/8 (mixed), or 7/8 (fraction)")
@@ -154,7 +154,7 @@ struct SceneEditSheet: View {
                         .textFieldStyle(RoundedBorderTextFieldStyle())
                         .focused($focusedField, equals: .estimate)
                         .border(estimatedTimeIsValid ? Color.clear : Color.red, width: 1)
-                        .onChange(of: editEstimatedTime) { _ in validateEstimatedTime() }
+                        .onChange(of: editEstimatedTime) { _, _ in validateEstimatedTime() }
 
                     if !estimatedTimeIsValid {
                         Text("Invalid format. Use: 4 (4 hours), 15 (15 minutes), or 2:30 (2hr 30min)")
@@ -269,7 +269,7 @@ struct SceneEditSheet: View {
             focusDurationField()
             breakdownExpanded = breakdownExpandedByDefault
         }
-        .onChange(of: scene.id) { _ in
+        .onChange(of: scene.id) { _, _ in
             populateFields()
             focusDurationField()
             breakdownExpanded = breakdownExpandedByDefault

@@ -267,6 +267,7 @@ struct StripboardView: View {
                             onEdit:      { editScene(dayIndex: dayIndex, sceneIndex: sceneIndex, dayId: day.id) },
                             onRemove:    { removeFromDay(scene, dayId: day.id) },
                             onDuplicate: { duplicateScene(scene) },
+                            onToggleCompleted: { toggleSceneCompleted(scene, dayId: day.id) },
                             onDragStart: { interactingSceneId = scene.id },
                             onDragEnd:   { interactingSceneId = nil },
                             onSelect:    { selectScene(scene, dayId: day.id) }
@@ -615,6 +616,19 @@ struct StripboardView: View {
         }
     }
 
+    private func toggleSceneCompleted(_ scene: Scene, dayId: UUID) {
+        let newValue = !scene.isCompleted
+        let idsToToggle: Set<UUID> = (selectedSceneIDs.contains(scene.id) && selectedSceneIDs.count > 1)
+            ? selectedSceneIDs
+            : [scene.id]
+        for id in idsToToggle {
+            guard let di = shootDays.firstIndex(where: { $0.scenes.contains(where: { $0.id == id }) }),
+                  let si = shootDays[di].scenes.firstIndex(where: { $0.id == id }) else { continue }
+            shootDays[di].scenes[si].isCompleted = newValue
+        }
+        onSceneChanged()
+    }
+
     private func duplicateScene(_ scene: Scene) {
         allScenes.append(Scene(
             title:            scene.title + " (Copy)",
@@ -736,6 +750,7 @@ struct SceneStripRow: View {
     let onEdit:      () -> Void
     let onRemove:    () -> Void
     let onDuplicate: () -> Void
+    let onToggleCompleted: () -> Void
     let onDragStart: () -> Void
     let onDragEnd:   () -> Void
     let onSelect:    () -> Void
@@ -838,6 +853,12 @@ struct SceneStripRow: View {
             Button(L("Edit Scene")) { interactingSceneId = nil; onEdit() }
             Button(isMultiSelected ? "\(L("Remove")) \(selectionCount) \(L("scenes"))" : L("Remove from Day")) {
                 interactingSceneId = nil; onRemove()
+            }
+            Divider()
+            Button(isMultiSelected
+                   ? "Mark \(selectionCount) Scenes as \(scene.isCompleted ? "Incomplete" : "Completed")"
+                   : (scene.isCompleted ? "Mark as Incomplete" : "Mark as Completed")) {
+                interactingSceneId = nil; onToggleCompleted()
             }
             Divider()
             Button(L("Duplicate Scene")) { interactingSceneId = nil; onDuplicate() }
