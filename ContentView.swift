@@ -149,6 +149,9 @@ struct ContentView: View {
     // MARK: - Computed statistics
     private var scheduledDays: [ShootDay] { shootDays.filter { !$0.scenes.isEmpty } }
     private var totalScenes:   Int        { scheduledDays.reduce(0) { $0 + $1.scenes.count } }
+    private var completedScenesCount: Int {
+        scheduledDays.reduce(0) { $0 + $1.scenes.filter { $0.isCompleted }.count }
+    }
     private var totalDuration: String     { formattedEighths(scheduledDays.reduce(0) { $0 + $1.totalDuration }) }
     private var totalEstTime:  String     { formattedTime(scheduledDays.reduce(0) { $0 + $1.totalEstimatedTime }) }
 
@@ -952,7 +955,7 @@ struct ContentView: View {
 
             HStack(spacing: 15) {
                 statBadge(icon: "calendar", value: "\(scheduledDays.count)", label: "days",   color: .blue)
-                statBadge(icon: "film",     value: "\(totalScenes)",          label: "scenes", color: .green)
+                statBadge(icon: "checkmark.circle", value: "\(completedScenesCount)/\(totalScenes)", label: "completed", color: .green)
                 statBadge(icon: "clock",    value: totalEstTime,              label: nil,      color: .purple)
                 let unscheduledCount = allScenes.filter { !$0.isBanner }.count
                 if unscheduledCount > 0 {
