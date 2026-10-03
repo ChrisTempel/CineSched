@@ -71,7 +71,7 @@ struct StripboardView: View {
                 }
                 .padding(10)
             }
-            .onChange(of: scrollToDate) { newValue in
+            .onChange(of: scrollToDate) { _, newValue in
                 guard let date = newValue else { return }
                 if let target = shootDays.first(where: { Calendar.current.isDate($0.date, inSameDayAs: date) }) {
                     withAnimation { proxy.scrollTo(target.id, anchor: .top) }
@@ -81,7 +81,7 @@ struct StripboardView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .tooltipContainer()
-        .onChange(of: dragStateResetToken) { _ in
+        .onChange(of: dragStateResetToken) { _, _ in
             // Same fix as CompactMonthCalendarView: undo/redo restores allScenes/shootDays
             // but can't reach into this view's own local drag-target state, so a day
             // cell's drop-target border could otherwise stay stuck highlighted after undo.
@@ -130,7 +130,7 @@ struct StripboardView: View {
                 }
             })
         }
-        .onChange(of: showingEditSheet) { isShowing in
+        .onChange(of: showingEditSheet) { _, isShowing in
             if !isShowing { clearEditingState() }
         }
     }
@@ -165,7 +165,7 @@ struct StripboardView: View {
                 }
 
                 if let idx = existingIdx {
-                    let title = "\(item.kind.icon) \(item.kind.defaultTitle) (\(timeClean))"
+                    let title = "\(item.kind.defaultTitle) (\(timeClean))"
                     updatedScenes[idx].title = title
                     updatedScenes[idx].bannerTitle = title
                     updatedScenes[idx].summary = timeClean
@@ -391,19 +391,19 @@ struct StripboardView: View {
                 }
                 HStack(spacing: 6) {
                     if !day.callSheet.lunchTime.isEmpty {
-                        Text("🍽️ \(day.callSheet.lunchTime)")
+                        Text("Lunch \(day.callSheet.lunchTime)")
                             .font(.caption).foregroundColor(.secondary)
                     }
                     if !day.callSheet.snackTime.isEmpty {
-                        Text("☕ \(day.callSheet.snackTime)")
+                        Text("Snack \(day.callSheet.snackTime)")
                             .font(.caption).foregroundColor(.secondary)
                     }
                     if !day.callSheet.dinnerTime.isEmpty {
-                        Text("🍕 \(day.callSheet.dinnerTime)")
+                        Text("Dinner \(day.callSheet.dinnerTime)")
                             .font(.caption).foregroundColor(.secondary)
                     }
                     if !day.callSheet.wrapTime.isEmpty {
-                        Text("🎬 \(day.callSheet.wrapTime)")
+                        Text("Wrap \(day.callSheet.wrapTime)")
                             .font(.caption).foregroundColor(.secondary)
                     }
                 }
@@ -786,7 +786,7 @@ struct SceneStripRow: View {
                         .frame(minWidth: 22, alignment: .leading)
                 }
 
-                Text(scene.title)
+                Text(scene.title.strippingLeadingEmoji())
                     .font(.system(size: 12, weight: .medium))
                     .foregroundColor(scene.stripTextColor)
                     .lineLimit(1)
@@ -863,7 +863,7 @@ struct SceneStripRow: View {
             Divider()
             Button(L("Duplicate Scene")) { interactingSceneId = nil; onDuplicate() }
         }
-        .onChange(of: isDragging) { dragging in
+        .onChange(of: isDragging) { _, dragging in
             if !dragging { onDragEnd() }
         }
     }
@@ -905,26 +905,26 @@ struct BannerStripRow: View {
 
     private var bannerDisplayTitle: String {
         if let kind = scene.mealKind {
-            return "\(kind.icon) \(kind.defaultTitle)"
+            return kind.defaultTitle
         }
         let raw = scene.title.replacingOccurrences(of: #"\s*\(\s*\d{1,2}:\d{2}\s*(?:AM|PM|am|pm)?\s*\)"#, with: "", options: .regularExpression).trimmingCharacters(in: .whitespaces)
         if raw == "Notice / Note" || raw == "Aviso / Nota" || raw == "Notice" || raw == "Nota" || raw == "Aviso" {
             return L("Notice")
         }
         if raw.contains("ALMUERZO / LUNCH") || raw.contains("LUNCH / ALMUERZO") {
-            return "🍽️ \(L("LUNCH"))"
+            return L("LUNCH")
         }
         if raw.contains("MERIENDA / SNACK") || raw.contains("SNACK / MERIENDA") {
-            return "☕ \(L("SNACK"))"
+            return L("SNACK")
         }
         if raw.contains("CENA / DINNER") || raw.contains("DINNER / CENA") {
-            return "🍕 \(L("DINNER"))"
+            return L("DINNER")
         }
         if raw.contains("FIN DE RODAJE / WRAP") || raw.contains("WRAP / FIN DE RODAJE") {
-            return "🎬 \(L("WRAP"))"
+            return L("WRAP")
         }
         if raw.contains("READY TO SHOOT / EN SET") {
-            return "🎬 \(L("READY TO SHOOT"))"
+            return L("READY TO SHOOT")
         }
         return raw
     }

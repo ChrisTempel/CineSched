@@ -56,7 +56,7 @@ struct BannerInputSheet: View {
                         }
                     }
                     .pickerStyle(.segmented)
-                    .onChange(of: bannerType) { newType in
+                    .onChange(of: bannerType) { _, newType in
                         if title.isEmpty || title == placeholderForType {
                             title = defaultTitle(for: newType)
                         }

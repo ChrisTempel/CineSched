@@ -32,9 +32,8 @@ struct ShootingSchedulePDFExporter {
         let isSpanish = LocalizationManager.shared.currentLanguage == .spanish
         // Strip any hardcoded parenthesized times like "(01:30 PM)" or "(07:30 AM)"
         var clean = rawTitle.replacingOccurrences(of: #"\s*\(\s*\d{1,2}:\d{2}\s*(?:AM|PM|am|pm)?\s*\)"#, with: "", options: .regularExpression)
-        // Strip any existing leading emojis like 🍽️, 🍽, 🍴, 🚌, 🎬
-        clean = clean.replacingOccurrences(of: #"^[🍽🍴🚌🎬\s]+"#, with: "", options: .regularExpression)
-        clean = clean.trimmingCharacters(in: .whitespaces)
+        // Strip any leading emoji
+        clean = clean.strippingLeadingEmoji().trimmingCharacters(in: .whitespaces)
 
         // Translate typical bilingual or default banner titles
         let lower = clean.lowercased()
@@ -321,13 +320,13 @@ struct ShootingSchedulePDFExporter {
         var milestones: [String] = []
         if !day.callSheet.generalCallTime.isEmpty {
             let label = isSpanish ? "LLEGADA:" : "CREW CALL:"
-            milestones.append("🚌 \(label) \(day.callSheet.generalCallTime)")
+            milestones.append("\(label) \(day.callSheet.generalCallTime)")
         }
         if !day.callSheet.readyToShootTime.isEmpty {
-            milestones.append("🎬 SET: \(day.callSheet.readyToShootTime)")
+            milestones.append("SET: \(day.callSheet.readyToShootTime)")
         }
         if !lunchTime.isEmpty {
-            milestones.append("🍽️ \(lunchTime)")
+            milestones.append(lunchTime)
         }
 
         let milesStr = milestones.joined(separator: "  |  ")
@@ -465,8 +464,7 @@ struct ShootingSchedulePDFExporter {
 
         // Cleaned and localized title
         let cleanedTitle = cleanBannerTitle(scene.title)
-        let icon = isMeal ? "🍽️ " : (isCrewCall ? "🚌 " : (isSetCall ? "🎬 " : ""))
-        let titleText = "\(icon)\(cleanedTitle.uppercased())"
+        let titleText = cleanedTitle.uppercased()
         let maxTitleW = width - (col1W + 90)
         drawBoundedText(titleText, at: CGPoint(x: xCol2, y: yPosition - 14), maxWidth: maxTitleW, font: NSFont.boldSystemFont(ofSize: 8.5), color: textColor, context: context)
 

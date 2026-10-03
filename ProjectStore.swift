@@ -220,6 +220,7 @@ extension ContentView {
             if let first = shootDays.first?.date, let last = shootDays.last?.date {
                 startDate = first
                 endDate   = last
+                lastAppliedStartDate = first
             }
             print("Loaded project '\(loaded.projectTitle)' from \(source)")
         }
@@ -236,6 +237,7 @@ extension ContentView {
             if let first = shootDays.first?.date, let last = shootDays.last?.date {
                 startDate = first
                 endDate   = last
+                lastAppliedStartDate = first
             }
             print("Loaded legacy project from \(source)")
             return

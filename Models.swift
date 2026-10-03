@@ -4,6 +4,32 @@
 import SwiftUI
 import AppKit
 
+// MARK: - Emoji stripping
+
+extension String {
+    /// Removes any emoji (and surrounding whitespace) from the start of the string.
+    /// The single shared implementation for every scene-title-cleaning path in the app —
+    /// previously decoradoOnly, cleanBannerTitle, and displayTitle each had their own
+    /// separate, independently-written logic for this, and each had a different gap.
+    ///
+    /// Checks `isEmoji` together with `value > 0x7F` rather than `isEmojiPresentation`
+    /// alone: some emoji (🍽️, fork and knife with plate, is the one that exposed this)
+    /// default to TEXT presentation and only render as emoji with an explicit variation
+    /// selector, so isEmojiPresentation alone misses them — that gap is exactly why lunch
+    /// and dinner banners behaved inconsistently in testing. Restricting to codepoints
+    /// above ASCII keeps this safe for plain digits/letters, which are also flagged
+    /// isEmoji (for keycap sequences like "1️⃣") but must never be stripped from the
+    /// start of a scene number.
+    func strippingLeadingEmoji() -> String {
+        var s = self
+        while let first = s.unicodeScalars.first,
+              (first.properties.isEmoji && first.value > 0x7F) || first == "\u{FE0F}" || first == " " {
+            s.unicodeScalars.removeFirst()
+        }
+        return s
+    }
+}
+
 // MARK: - Color blending
 
 extension Color {
@@ -132,14 +158,7 @@ enum MealKind: String, CaseIterable, Codable {
     case wrap         = "Wrap"
 
     var icon: String {
-        switch self {
-        case .generalCall:  return "⏰"
-        case .readyToShoot: return "🎬"
-        case .lunch:        return "🍽️"
-        case .snack:        return "☕"
-        case .dinner:       return "🍕"
-        case .wrap:         return "🎬"
-        }
+        ""
     }
 
     var defaultTitle: String {
@@ -282,7 +301,7 @@ struct Scene: Identifiable, Codable, Hashable {
 
     static func createAutoMeal(kind: MealKind, timeString: String) -> Scene {
         let cleanTime = timeString.trimmingCharacters(in: .whitespaces)
-        let title = "\(kind.icon) \(kind.defaultTitle) \(cleanTime.isEmpty ? "" : "(\(cleanTime))")"
+        let title = "\(kind.defaultTitle) \(cleanTime.isEmpty ? "" : "(\(cleanTime))")"
         let colorHex: String
         let estTime: Int
         let bType: BannerType
@@ -420,9 +439,10 @@ struct Scene: Identifiable, Codable, Hashable {
     /// also covers scenes saved before this field existed (their number, if any,
     /// is already part of `title` from that era).
     var displayTitle: String {
-        if isBanner { return title }
+        if isBanner { return title.strippingLeadingEmoji() }
         let trimmedNum = sceneNumber.trimmingCharacters(in: .whitespaces)
-        return trimmedNum.isEmpty ? title : "\(trimmedNum). \(title)"
+        let cleanTitle = title.strippingLeadingEmoji()
+        return trimmedNum.isEmpty ? cleanTitle : "\(trimmedNum). \(cleanTitle)"
     }
 
     /// Auto-parses leading scene number from title if `sceneNumber` is currently empty.
@@ -461,7 +481,7 @@ struct Scene: Identifiable, Codable, Hashable {
         if !realLocation.trimmingCharacters(in: .whitespaces).isEmpty {
             return realLocation.trimmingCharacters(in: .whitespaces).uppercased()
         }
-        var s = title.trimmingCharacters(in: .whitespaces)
+        var s = title.trimmingCharacters(in: .whitespaces).strippingLeadingEmoji()
         // Strip leading number like "1. ", "12A - ", "#2. "
         s = s.replacingOccurrences(of: "^#?\\d+[A-Za-z]?\\.?\\s*[-–—.]?\\s*", with: "", options: .regularExpression)
         // Strip INT./EXT., INT., EXT., I/E., I/E
@@ -1072,7 +1092,7 @@ struct ShootDay: Identifiable, Codable {
 
 // MARK: - ProjectData
 
-struct ProjectData: Codable {
+nonisolated struct ProjectData: Codable {
     var allScenes:          [Scene]
     var shootDays:          [ShootDay]
     var projectTitle:       String
@@ -1099,7 +1119,7 @@ struct ProjectData: Codable {
 
 // MARK: - Legacy Support
 
-struct LegacyProjectData: Codable {
+nonisolated struct LegacyProjectData: Codable {
     var allScenes: [Scene]
     var shootDays: [ShootDay]
 }

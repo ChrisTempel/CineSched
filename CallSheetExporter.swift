@@ -221,7 +221,7 @@ class CallSheetExporter {
 
         // --- Box 1: SHOOTING CONTACTS ---
         let cPara = NSMutableParagraphStyle(); cPara.alignment = .center
-        let contactsTitle = lang == .spanish ? "☎ CONTACTOS EN RODAJE" : "☎ SHOOTING CONTACTS"
+        let contactsTitle = lang == .spanish ? "CONTACTOS EN RODAJE" : "SHOOTING CONTACTS"
         let cTitleAttr: [NSAttributedString.Key: Any] = [.font: fontSectionHdr, .foregroundColor: colorBlack, .paragraphStyle: cPara]
         NSAttributedString(string: contactsTitle, attributes: cTitleAttr)
             .draw(in: CGRect(x: r1.minX + 4, y: r1.maxY - 13, width: r1.width - 8, height: 12))
@@ -308,7 +308,7 @@ class CallSheetExporter {
         }
 
         // --- Box 3: WEATHER FORECAST ---
-        let weatherTitle = lang == .spanish ? "☁ PREVISIÓN METEOROLÓGICA" : "☁ WEATHER FORECAST"
+        let weatherTitle = lang == .spanish ? "PREVISIÓN METEOROLÓGICA" : "WEATHER FORECAST"
         NSAttributedString(string: weatherTitle, attributes: cTitleAttr)
             .draw(in: CGRect(x: r3.minX + 4, y: r3.maxY - 13, width: r3.width - 8, height: 12))
 
@@ -343,7 +343,7 @@ class CallSheetExporter {
         colorBorder.setStroke()
         let b = NSBezierPath(rect: rect); b.lineWidth = 0.75; b.stroke()
 
-        let basecampTitle = lang == .spanish ? "⛺ BASECAMP / BASE DE RODAJE:" : "⛺ BASECAMP:"
+        let basecampTitle = lang == .spanish ? "BASECAMP / BASE DE RODAJE:" : "BASECAMP:"
         let basecampText = callSheet.basecampLocation.trimmingCharacters(in: .whitespaces)
         let full = basecampText.isEmpty ? basecampTitle : "\(basecampTitle) \(basecampText)"
         let attr: [NSAttributedString.Key: Any] = [
@@ -365,7 +365,7 @@ class CallSheetExporter {
         colorBorder.setStroke()
         let b = NSBezierPath(rect: rect); b.lineWidth = 1; b.stroke()
 
-        let hospTitle = lang == .spanish ? "✚ HOSPITAL MÁS CERCANO:" : "✚ NEAREST HOSPITAL:"
+        let hospTitle = lang == .spanish ? "HOSPITAL MÁS CERCANO:" : "NEAREST HOSPITAL:"
         let hospText = callSheet.nearestHospital.trimmingCharacters(in: .whitespaces)
         let full = hospText.isEmpty ? hospTitle : "\(hospTitle) \(hospText)"
         let attr: [NSAttributedString.Key: Any] = [

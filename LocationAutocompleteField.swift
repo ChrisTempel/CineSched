@@ -24,7 +24,7 @@ struct LocationAutocompleteField: View {
             VStack(alignment: .leading, spacing: 0) {
                 TextField(placeholder, text: $text)
                     .textFieldStyle(RoundedBorderTextFieldStyle())
-                    .onChange(of: text) { _ in
+                    .onChange(of: text) { _, _ in
                         isShowingSuggestions = !filteredSuggestions.isEmpty
                     }
 

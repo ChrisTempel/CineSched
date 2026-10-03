@@ -344,7 +344,7 @@ struct DayDetailSheet: View {
                     .cornerRadius(4)
 
                 // Title
-                Text(scene.title)
+                Text(scene.title.strippingLeadingEmoji())
                     .font(.subheadline.bold())
                     .foregroundColor(scene.stripTextColor)
                     .lineLimit(1)

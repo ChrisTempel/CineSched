@@ -195,7 +195,7 @@ class StripboardPDFExporter {
         }
 
         let titleWidth = rect.maxX - pagesWidth - castWidth - 18 - x
-        NSAttributedString(string: scene.title, attributes: titleAttr)
+        NSAttributedString(string: scene.displayTitle, attributes: titleAttr)
             .draw(in: CGRect(x: x, y: rect.midY - 5.5, width: max(titleWidth, 20), height: 12))
 
         return y - stripHeight - stripSpacing

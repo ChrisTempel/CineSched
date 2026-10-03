@@ -39,7 +39,7 @@ struct NewSceneInputView: View {
             // Duration field — optional for Custom strips / notice strips
             VStack(alignment: .leading, spacing: 4) {
                 TextField(L("Duration (pages)"), text: $newDuration)
-                    .onChange(of: newDuration) { _ in validateInputs() }
+                    .onChange(of: newDuration) { _, _ in validateInputs() }
 
                 if !durationIsValid {
                     Text("Invalid page format. Use: 15, 1 7/8, 7/8")
@@ -56,7 +56,7 @@ struct NewSceneInputView: View {
             // Estimated time field
             VStack(alignment: .leading, spacing: 4) {
                 TextField(L("Estimated Time"), text: $newEstimate)
-                    .onChange(of: newEstimate) { _ in validateInputs() }
+                    .onChange(of: newEstimate) { _, _ in validateInputs() }
 
                 if !estimatedTimeIsValid {
                     Text("Invalid time format. Use: 4 (hours), 15 (mins), 2:30")

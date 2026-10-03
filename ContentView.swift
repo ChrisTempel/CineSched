@@ -39,6 +39,13 @@ struct ContentView: View {
     )
     @State var startDate:   Date = Calendar.current.date(
         from: Calendar.current.dateComponents([.year, .month], from: Date()))!
+    /// The start date actually in effect the last time the calendar was generated (via
+    /// load or a prior Update Calendar click) — used as the true baseline for Shift
+    /// Schedule's day-offset math. Previously this was inferred from the earliest
+    /// scheduled scene's date instead, which is wrong whenever the schedule has any empty
+    /// days before its first real scene (a "Cast & Crew Arrive" day, for instance) — that
+    /// mismatch is exactly what caused a shifted scene to land a day early.
+    @State var lastAppliedStartDate: Date? = nil
     @State var endDate:     Date = Calendar.current.date(
         byAdding: .day, value: 30, to: Date())!
     @State var projectTitle: String = "Untitled Movie"
@@ -740,7 +747,7 @@ struct ContentView: View {
                                 .frame(minWidth: 18, alignment: .leading)
                         }
 
-                        Text(item.scene.title)
+                        Text(item.scene.title.strippingLeadingEmoji())
                             .font(.system(size: 11, weight: .medium))
                             .foregroundColor(item.scene.stripTextColor)
                             .lineLimit(1)
@@ -1298,9 +1305,11 @@ struct ContentView: View {
             }
         }
 
-        // 2. Find old shooting start date (from actual script scenes or previous start)
+        // 2. Find the true previous start date — tracked explicitly (see
+        // lastAppliedStartDate) rather than inferred from scene data, since the earliest
+        // scheduled scene's date is not reliably the same as the schedule's actual start.
         let sortedScriptDates = scriptScenesByDate.keys.sorted()
-        let oldScriptStart = sortedScriptDates.first ?? normNewStart
+        let oldScriptStart = lastAppliedStartDate ?? sortedScriptDates.first ?? normNewStart
         let dayOffset = cal.dateComponents([.day], from: oldScriptStart, to: normNewStart).day ?? 0
 
         var updatedDays: [ShootDay] = []
@@ -1355,6 +1364,7 @@ struct ContentView: View {
 
         updatedDays.sort { $0.date < $1.date }
         shootDays = updatedDays
+        lastAppliedStartDate = normNewStart
         recomputeSortedScenes()
         pruneSelection()
         recomputeConflicts()
